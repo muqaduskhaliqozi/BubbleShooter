@@ -1,3 +1,4 @@
+
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -9,6 +10,16 @@ public class MainMenuController : MonoBehaviour
     public void PlayButton()
     {
         Debug.Log("[MainMenuController] Play button clicked.");
+
+        // CP Ad on Play button
+        if (CheckCpAd.instance != null)
+        {
+            CheckCpAd.instance.CallAd();
+        }
+        else
+        {
+            Debug.LogWarning("[MainMenuController] CheckCpAd instance is NULL.");
+        }
 
         if (string.IsNullOrEmpty(gameplaySceneName))
         {

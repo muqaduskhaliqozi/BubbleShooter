@@ -31,21 +31,27 @@ namespace BubbleShooter.Core
         [SerializeField] private MissIndicatorUI missIndicator;
 
         [Header("Gameplay Bounds")]
-        [Tooltip("ON: walls aur ceiling BubbleGrid (diameter/columns) se khud nikalte hain. Bubble size badalne par kuch manually nahi badalna.")]
+        [Tooltip("ON: walls and ceiling are calculated from BubbleGrid.")]
         [SerializeField] private bool useGridBounds = true;
         [SerializeField] private float leftWallX = -3.2f;
         [SerializeField] private float rightWallX = 3.2f;
         [SerializeField] private float ceilingY = 3.8f;
 
         [Header("Miss Rule")]
-        [Tooltip("ON: koi shot match kare to miss counter 0 ho jata hai (lagataar misses). " +
-                 "OFF: poore level mein total misses gine jate hain.")]
+        [Tooltip("Agar kisi level mein Maximum Missed Shots 0 ho to yeh value use hogi. " +
+                 "Level ki apni value 0 se zyada ho to wohi chalegi.")]
+        [SerializeField] private int fallbackMaxMisses = 12;
+
+        [Tooltip("ON: a successful match resets the consecutive miss counter.")]
         [SerializeField] private bool resetMissesOnMatch = false;
-        [Tooltip("ON: jo shot miss ho (match na bane) wo bubble grid se chipakne ke bajaye ghaib ho jati hai.")]
+
+        [Tooltip("ON: a shot that does not match is removed from the grid.")]
         [SerializeField] private bool removeMissedBubble = true;
 
         private int missCount = 0;
         private bool eventsBound = false;
+        private bool swapPressActive;
+
         public GameState CurrentState => currentState;
 
         private void Awake()
@@ -60,41 +66,63 @@ namespace BubbleShooter.Core
 
         private void ValidateReferences()
         {
-            if (bubbleGrid == null) Debug.LogError("[BubbleShooter] BubbleGrid reference missing on GameManager!");
-            if (levelManager == null) Debug.LogError("[BubbleShooter] LevelManager reference missing on GameManager!");
-            if (shooterController == null) Debug.LogError("[BubbleShooter] ShooterController reference missing on GameManager!");
-            if (aimController == null) Debug.LogError("[BubbleShooter] AimController reference missing on GameManager!");
-            if (matchFinder == null) Debug.LogError("[BubbleShooter] BubbleMatchFinder reference missing on GameManager!");
-            if (floatingDetector == null) Debug.LogError("[BubbleShooter] FloatingBubbleDetector reference missing on GameManager!");
-            if (scoreManager == null) Debug.LogError("[BubbleShooter] ScoreManager reference missing on GameManager!");
-            if (gameplayUI == null) Debug.LogError("[BubbleShooter] GameplayUI reference missing on GameManager!");
+            if (bubbleGrid == null)
+                Debug.LogError("[BubbleShooter] BubbleGrid reference missing!");
+
+            if (levelManager == null)
+                Debug.LogError("[BubbleShooter] LevelManager reference missing!");
+
+            if (shooterController == null)
+                Debug.LogError("[BubbleShooter] ShooterController reference missing!");
+
+            if (aimController == null)
+                Debug.LogError("[BubbleShooter] AimController reference missing!");
+
+            if (matchFinder == null)
+                Debug.LogError("[BubbleShooter] BubbleMatchFinder reference missing!");
+
+            if (floatingDetector == null)
+                Debug.LogError("[BubbleShooter] FloatingBubbleDetector reference missing!");
+
+            if (scoreManager == null)
+                Debug.LogError("[BubbleShooter] ScoreManager reference missing!");
+
+            if (gameplayUI == null)
+                Debug.LogError("[BubbleShooter] GameplayUI reference missing!");
         }
 
         // ---------------------------------------------------------------
         // Setup
         // ---------------------------------------------------------------
 
-        /// <summary>Game shuru hone par ek baar chalta hai: subsystems init + events bind + level 1.</summary>
         public void InitializeGameplay()
         {
             SetState(GameState.Loading);
+
             Debug.Log("[BubbleShooter] Gameplay initialized.");
 
-            // Subsystem cross-initialization
-            if (colorGenerator != null) colorGenerator.Initialize(bubbleGrid);
-            if (matchFinder != null) matchFinder.Initialize(bubbleGrid);
-            if (floatingDetector != null) floatingDetector.Initialize(bubbleGrid);
-            if (levelManager != null) levelManager.Initialize(bubbleGrid, bubblePrefab);
+            if (colorGenerator != null)
+                colorGenerator.Initialize(bubbleGrid);
+
+            if (matchFinder != null)
+                matchFinder.Initialize(bubbleGrid);
+
+            if (floatingDetector != null)
+                floatingDetector.Initialize(bubbleGrid);
+
+            if (levelManager != null)
+                levelManager.Initialize(bubbleGrid, bubblePrefab);
 
             BindEventsOnce();
 
             StartLevel(false);
         }
 
-        /// <summary>Events sirf ek baar bind hote hain (Retry/Next par dobara nahi).</summary>
         private void BindEventsOnce()
         {
-            if (eventsBound) return;
+            if (eventsBound)
+                return;
+
             eventsBound = true;
 
             if (gameplayUI != null)
@@ -108,29 +136,33 @@ namespace BubbleShooter.Core
 
             if (scoreManager != null)
             {
-                scoreManager.OnScoreChanged += (score) => {
-                    if (gameplayUI != null) gameplayUI.UpdateScoreText(score);
+                scoreManager.OnScoreChanged += (score) =>
+                {
+                    if (gameplayUI != null)
+                        gameplayUI.UpdateScoreText(score);
                 };
             }
 
             if (aimController != null)
-            {
                 aimController.OnAimReleased += HandleAimReleased;
-            }
         }
 
-        /// <summary>
-        /// Shooter/aim ke liye playfield ki hadein. useGridBounds ON ho to grid se nikalti hain,
-        /// is liye bubble ka size ya columns badalne par walls khud sahi ho jate hain.
-        /// </summary>
-        private void GetPlayBounds(out float left, out float right, out float ceiling)
+        // ---------------------------------------------------------------
+        // Gameplay bounds
+        // ---------------------------------------------------------------
+
+        private void GetPlayBounds(
+            out float left,
+            out float right,
+            out float ceiling)
         {
             if (useGridBounds && bubbleGrid != null)
             {
-                float d = bubbleGrid.BubbleDiameter;
-                left = bubbleGrid.LeftWallX - d * 0.5f;      // wall ka edge
-                right = bubbleGrid.RightWallX + d * 0.5f;
-                ceiling = bubbleGrid.CeilingY + d * 0.25f;
+                float diameter = bubbleGrid.BubbleDiameter;
+
+                left = bubbleGrid.LeftWallX - diameter * 0.5f;
+                right = bubbleGrid.RightWallX + diameter * 0.5f;
+                ceiling = bubbleGrid.CeilingY + diameter * 0.25f;
             }
             else
             {
@@ -140,58 +172,82 @@ namespace BubbleShooter.Core
             }
         }
 
-        /// <summary>
-        /// Current level ko shuru karta hai (UI reset, shooter setup, state Ready).
-        /// alreadyLoaded = true ho to LevelManager.LoadLevel() dobara nahi chalta
-        /// (jaise LoadNextLevel() ne level pehle hi load kar diya ho).
-        /// </summary>
+        private void ApplyAimBounds()
+        {
+            if (aimController == null)
+                return;
+
+            GetPlayBounds(
+                out float left,
+                out float right,
+                out float ceiling);
+
+            aimController.SetBounds(left, right, ceiling);
+        }
+
+        // ---------------------------------------------------------------
+        // Start / reset level
+        // ---------------------------------------------------------------
+
         private void StartLevel(bool alreadyLoaded)
         {
             StopAllCoroutines();
+
+            swapPressActive = false;
             Time.timeScale = 1f;
+
             SetState(GameState.Loading);
 
-            if (gameplayUI != null) gameplayUI.HideAllPanels();
-            if (scoreManager != null) scoreManager.ResetScore();
+            if (gameplayUI != null)
+                gameplayUI.HideAllPanels();
+
+            if (scoreManager != null)
+                scoreManager.ResetScore();
 
             if (aimController != null)
-            {
-                GetPlayBounds(out float l, out float r, out float c);
-                aimController.SetBounds(l, r, c);
                 aimController.HideAimLine();
-            }
 
-            // LevelManager.LoadLevel() grid khud clear karta hai
             if (!alreadyLoaded && levelManager != null)
-            {
                 levelManager.LoadLevel();
-            }
 
-            if (gameplayUI != null && levelManager != null && levelManager.CurrentLevelData != null)
+            ApplyAimBounds();
+
+            if (gameplayUI != null &&
+                levelManager != null &&
+                levelManager.CurrentLevelData != null)
             {
-                gameplayUI.UpdateLevelText(levelManager.CurrentLevelData.levelNumber);
+                gameplayUI.UpdateLevelText(
+                    levelManager.CurrentLevelData.levelNumber);
             }
 
-            // Setup Shooter
-            if (shooterController != null && levelManager != null && levelManager.CurrentLevelData != null)
+            if (shooterController != null &&
+                levelManager != null &&
+                levelManager.CurrentLevelData != null)
             {
-                shooterController.SetupShooter(levelManager.CurrentLevelData.availableColors);
+                shooterController.SetupShooter(
+                    levelManager.CurrentLevelData.availableColors);
             }
 
-            // Shooter ki bubble ka color grid ke colors mein se ho
             RefreshShooterColors();
 
             missCount = 0;
             UpdateMissesUI();
+
             SetState(GameState.Ready);
 
             if (gameplayUI != null)
             {
-                gameplayUI.SetInstructionText("Drag or Click to Aim, Release to Shoot!", true);
+                gameplayUI.SetInstructionText(
+                    "Drag or Click to Aim, Release to Shoot!", true);
             }
 
-            if (levelManager != null && levelManager.CurrentLevelData != null)
-                Debug.Log($"[BubbleShooter] Level {levelManager.CurrentLevelData.levelNumber} started.");
+            if (levelManager != null &&
+                levelManager.CurrentLevelData != null)
+            {
+                Debug.Log(
+                    $"[BubbleShooter] Level " +
+                    $"{levelManager.CurrentLevelData.levelNumber} started.");
+            }
         }
 
         // ---------------------------------------------------------------
@@ -200,111 +256,285 @@ namespace BubbleShooter.Core
 
         private void Update()
         {
-            if (currentState == GameState.Ready || currentState == GameState.Aiming)
+            if (currentState != GameState.Ready &&
+                currentState != GameState.Aiming)
             {
-                if (aimController != null && shooterController != null && shooterController.CurrentBubble != null)
-                {
-                    aimController.ProcessAimInput(shooterController.CurrentBubble.transform.position, true);
-                    if (aimController.IsAiming && currentState == GameState.Ready)
-                    {
-                        SetState(GameState.Aiming);
-                    }
-                }
+                swapPressActive = false;
             }
+
+            if (currentState != GameState.Ready &&
+                currentState != GameState.Aiming)
+            {
+                return;
+            }
+
+            if (aimController == null ||
+                shooterController == null ||
+                shooterController.CurrentBubble == null)
+            {
+                return;
+            }
+
+            if (HandleSwapInput())
+                return;
+
+            BubbleController currentBubble =
+                shooterController.CurrentBubble;
+
+            SpriteRenderer bubbleRenderer =
+                currentBubble.GetComponentInChildren<SpriteRenderer>();
+
+            if (bubbleRenderer != null)
+                aimController.SetAimColor(bubbleRenderer.color);
+
+            aimController.ProcessAimInput(
+                currentBubble.transform.position,
+                true);
+
+            if (aimController.IsAiming &&
+                currentState == GameState.Ready)
+            {
+                SetState(GameState.Aiming);
+            }
+        }
+
+        private static void ReadPointer(
+            out Vector2 position,
+            out bool down,
+            out bool up)
+        {
+            if (Input.touchCount > 0)
+            {
+                Touch touch = Input.GetTouch(0);
+
+                position = touch.position;
+                down = touch.phase == TouchPhase.Began;
+                up = touch.phase == TouchPhase.Ended ||
+                     touch.phase == TouchPhase.Canceled;
+
+                return;
+            }
+
+            position = Input.mousePosition;
+            down = Input.GetMouseButtonDown(0);
+            up = Input.GetMouseButtonUp(0);
+        }
+
+        private bool HandleSwapInput()
+        {
+            if (shooterController == null ||
+                aimController == null)
+            {
+                return false;
+            }
+
+            if (shooterController.IsSwapping)
+                return true;
+
+            ReadPointer(
+                out Vector2 position,
+                out bool down,
+                out bool up);
+
+            if (down &&
+                !aimController.IsAiming &&
+                shooterController.IsOnSwapZone(position))
+            {
+                swapPressActive = true;
+            }
+
+            if (!swapPressActive)
+                return false;
+
+            if (up)
+            {
+                swapPressActive = false;
+
+                if (shooterController.IsOnSwapZone(position))
+                    shooterController.SwapBubbles();
+            }
+
+            return true;
         }
 
         private void HandleAimReleased(Vector2 direction)
         {
-            if (currentState != GameState.Ready && currentState != GameState.Aiming)
+            if (currentState != GameState.Ready &&
+                currentState != GameState.Aiming)
+            {
                 return;
+            }
 
             SetState(GameState.Shooting);
-            if (gameplayUI != null) gameplayUI.SetInstructionText("", false);
 
-            Debug.Log($"[BubbleShooter] Shot fired direction: {direction}");
-
-            GetPlayBounds(out float left, out float right, out float ceiling);
-            bool shot = shooterController.Shoot(direction, left, right, ceiling, OnBubbleAttached);
-            if (!shot)
+            if (gameplayUI != null)
             {
-                SetState(GameState.Ready);
+                gameplayUI.SetInstructionText(
+                    "Drag or Click to Aim, Release to Shoot!", true);
             }
+
+            Debug.Log(
+                $"[BubbleShooter] Shot fired direction: {direction}");
+
+            GetPlayBounds(
+                out float left,
+                out float right,
+                out float ceiling);
+
+            // This callback now matches:
+            // Action<BubbleController, GridCoordinate, bool>
+            bool shot = shooterController.Shoot(
+                direction,
+                left,
+                right,
+                ceiling,
+                OnBubbleAttached);
+
+            if (!shot)
+                SetState(GameState.Ready);
         }
 
-        private void OnBubbleAttached(BubbleController attachedBubble, GridCoordinate coord)
+        // ---------------------------------------------------------------
+        // Bubble attached callback
+        // ---------------------------------------------------------------
+
+        private void OnBubbleAttached(
+            BubbleController attachedBubble,
+            GridCoordinate coord,
+            bool skipMatchProcessing)
         {
-            Debug.Log($"[BubbleShooter] Bubble attached at row {coord.Row} column {coord.Column}.");
+            Debug.Log(
+                $"[BubbleShooter] Bubble attached at row {coord.Row}, " +
+                $"column {coord.Column}. " +
+                $"Skip match processing: {skipMatchProcessing}");
+
+            // IMPORTANT:
+            // First direct hit on a locked bubble removes its rope.
+            // Do not run match detection or drop floating bubbles for
+            // this particular shot.
+            if (skipMatchProcessing)
+            {
+                RefreshShooterColors();
+                SetState(GameState.Ready);
+                return;
+            }
+
+            // Normal shot: run standard match and shot-resolution logic.
             SetState(GameState.Processing);
-            StartCoroutine(ProcessGridMatchesRoutine(attachedBubble, coord));
+
+            StartCoroutine(
+                ProcessGridMatchesRoutine(attachedBubble, coord));
         }
 
         // ---------------------------------------------------------------
         // Shot resolution
         // ---------------------------------------------------------------
 
-        private IEnumerator ProcessGridMatchesRoutine(BubbleController attachedBubble, GridCoordinate coord)
+        private IEnumerator ProcessGridMatchesRoutine(
+            BubbleController attachedBubble,
+            GridCoordinate coord)
         {
             yield return new WaitForSeconds(0.05f);
 
-            int minMatch = levelManager != null && levelManager.CurrentLevelData != null ? levelManager.CurrentLevelData.minimumMatchCount : 3;
-            List<BubbleController> matches = matchFinder != null ? matchFinder.FindMatches(attachedBubble, minMatch) : new List<BubbleController>();
+            int minMatch =
+                levelManager != null &&
+                levelManager.CurrentLevelData != null
+                    ? levelManager.CurrentLevelData.minimumMatchCount
+                    : 3;
+
+            List<BubbleController> matches =
+                matchFinder != null
+                    ? matchFinder.FindMatches(attachedBubble, minMatch)
+                    : new List<BubbleController>();
 
             if (matches.Count >= minMatch)
             {
-                Debug.Log($"[BubbleShooter] Match found: {matches.Count} bubbles.");
+                Debug.Log(
+                    $"[BubbleShooter] Match found: {matches.Count} bubbles.");
+
                 if (resetMissesOnMatch)
                 {
                     missCount = 0;
                     UpdateMissesUI();
                 }
 
-                // 1. Pop matched bubbles (pehle grid se hatao, phir animation)
-                int poppedCount = matches.Count;
-                foreach (var b in matches)
+                // 1. Matched bubbles: unlocked pop hongi,
+                //    locked (zanjeer wali) sirf unlock hongi.
+                int poppedCount = 0;
+                int unlockedCount = 0;
+
+                foreach (BubbleController bubble in matches)
                 {
-                    if (b != null)
+                    if (bubble == null)
+                        continue;
+
+                    // Locked bubble: group mein hone par sirf rope khulti hai,
+                    // bubble grid mein rehti hai (BubbleController ka apna lock).
+                    if (bubble.IsLocked)
                     {
-                        bubbleGrid.RemoveBubble(b.GridPosition.Row, b.GridPosition.Column);
-                        b.Pop();
+                        bubble.ApplyHit();
+                        unlockedCount++;
+                        continue;
                     }
+
+                    bubbleGrid.RemoveBubble(
+                        bubble.GridPosition.Row,
+                        bubble.GridPosition.Column);
+
+                    bubble.Pop();
+                    poppedCount++;
                 }
 
-                if (scoreManager != null)
-                {
+                Debug.Log(
+                    $"[BubbleShooter] Match result: {poppedCount} popped, " +
+                    $"{unlockedCount} locked bubble(s) only unlocked.");
+
+                if (scoreManager != null && poppedCount > 0)
                     scoreManager.AddMatchScore(poppedCount);
-                }
 
-                // 2. Floating bubbles: poore grid ka check.
-                //    Jo bubbles top se judi nahi (chahe kisi bhi color ki hon), sab gir jati hain.
+                // 2. Drop bubbles that are no longer connected to the ceiling.
                 int fallenCount = bubbleGrid.DropFloatingBubbles();
+
                 if (fallenCount > 0)
                 {
-                    Debug.Log($"[BubbleShooter] Floating bubbles dropped: {fallenCount}.");
+                    Debug.Log(
+                        $"[BubbleShooter] Floating bubbles dropped: " +
+                        $"{fallenCount}.");
 
                     if (scoreManager != null)
-                    {
-                        // Agar ScoreManager mein floating ka alag method ho to yahan wo use karo
                         scoreManager.AddMatchScore(fallenCount);
-                    }
                 }
 
                 yield return new WaitForSeconds(0.2f);
 
-                // 3. Aakhri 1-2 bubbles bachi hon to unhe bhi gira do
-                //    (sirf tab jab nayi rows aani baaqi na hon)
-                bool noPendingRows = levelManager == null || levelManager.PendingRowsRemaining <= 0;
-                List<BubbleController> remainingBubbles = bubbleGrid.GetAllBubbles();
+                // 3. Clear the final one or two bubbles if no rows remain.
+                bool noPendingRows =
+                    levelManager == null ||
+                    levelManager.PendingRowsRemaining <= 0;
 
-                if (noPendingRows && remainingBubbles.Count <= 2 && remainingBubbles.Count > 0)
+                List<BubbleController> remainingBubbles =
+                    bubbleGrid.GetAllBubbles();
+
+                if (noPendingRows &&
+                    remainingBubbles.Count <= 2 &&
+                    remainingBubbles.Count > 0)
                 {
                     foreach (BubbleController bubble in remainingBubbles)
                     {
-                        GridCoordinate pos = bubble.GetGridPosition();
-                        bubbleGrid.RemoveBubble(pos.Row, pos.Column);
+                        if (bubble == null)
+                            continue;
+
+                        GridCoordinate position =
+                            bubble.GetGridPosition();
+
+                        bubbleGrid.RemoveBubble(
+                            position.Row,
+                            position.Column);
 
                         Vector2 velocity = new Vector2(
-                            UnityEngine.Random.Range(-2f, 2f),
-                            UnityEngine.Random.Range(1f, 3f));
+                            Random.Range(-2f, 2f),
+                            Random.Range(1f, 3f));
+
                         bubble.Fall(velocity);
                     }
 
@@ -313,12 +543,13 @@ namespace BubbleShooter.Core
             }
             else
             {
-                // Shot missed (koi match nahi bana)
-
-                // Missed bubble grid se hata do aur ghaib kar do
+                // Shot missed: remove the attached bubble if configured.
                 if (removeMissedBubble && attachedBubble != null)
                 {
-                    bubbleGrid.RemoveBubble(coord.Row, coord.Column);
+                    bubbleGrid.RemoveBubble(
+                        coord.Row,
+                        coord.Column);
+
                     attachedBubble.Pop();
                 }
 
@@ -326,91 +557,163 @@ namespace BubbleShooter.Core
                 UpdateMissesUI();
 
                 if (scoreManager != null)
-                {
                     scoreManager.ResetCombo();
-                }
 
                 int maxMisses = GetMaxMisses();
-                Debug.Log($"[BubbleShooter] Missed shot {missCount}/{(maxMisses > 0 ? maxMisses.ToString() : "unlimited")}.");
 
-                // Miss limit poori ho gayi => Game Over
+                Debug.Log(
+                    $"[BubbleShooter] Missed shot {missCount}/" +
+                    $"{(maxMisses > 0 ? maxMisses.ToString() : "unlimited")}.");
+
                 if (maxMisses > 0 && missCount >= maxMisses)
                 {
                     SetState(GameState.Lose);
-                    Debug.Log("[BubbleShooter] Level Failed (miss limit reached).");
-                    if (gameplayUI != null) gameplayUI.ShowLosePanel(scoreManager != null ? scoreManager.CurrentScore : 0);
+
+                    Debug.Log(
+                        "[BubbleShooter] Level Failed (miss limit reached).");
+
+                    yield return new WaitForSeconds(0.9f);
+
+                    if (gameplayUI != null)
+                    {
+                        gameplayUI.ShowLosePanel(
+                            scoreManager != null
+                                ? scoreManager.CurrentScore
+                                : 0);
+                    }
+
                     yield break;
                 }
             }
 
-            // 4. Win check (LevelManager.CheckWinCondition ab pending rows bhi dekhta hai)
-            if (levelManager != null && levelManager.CheckWinCondition())
+            // 4. Check whether the level is complete.
+            if (levelManager != null &&
+                levelManager.CheckWinCondition())
             {
                 SetState(GameState.Win);
+
                 Debug.Log("[BubbleShooter] Level Complete.");
-                if (gameplayUI != null) gameplayUI.ShowWinPanel(scoreManager != null ? scoreManager.CurrentScore : 0);
+
+                if (gameplayUI != null)
+                {
+                    gameplayUI.ShowWinPanel(
+                        scoreManager != null
+                            ? scoreManager.CurrentScore
+                            : 0);
+                }
+
                 yield break;
             }
 
-            // 5. Nayi row upar se girana (har shotsPerNewRow shots ke baad)
+            // 5. Add a new row when required.
             if (levelManager != null)
             {
-                // Grid lagbhag khali ho aur rows baaqi hon to row foran aa jaye
-                bool forceRow = levelManager.PendingRowsRemaining > 0 && bubbleGrid.GetAllBubbles().Count <= 2;
+                bool forceRow =
+                    levelManager.PendingRowsRemaining > 0 &&
+                    bubbleGrid.GetAllBubbles().Count <= 2;
 
                 bool rowOk = true;
+
                 yield return StartCoroutine(
-                    levelManager.ResolveShotAndMaybeAddRow(ok => rowOk = ok, forceRow));
+                    levelManager.ResolveShotAndMaybeAddRow(
+                        ok => rowOk = ok,
+                        forceRow));
 
                 if (!rowOk)
                 {
                     SetState(GameState.Lose);
-                    Debug.Log("[BubbleShooter] Level Failed (bubbles reached the bottom).");
-                    if (gameplayUI != null) gameplayUI.ShowLosePanel(scoreManager != null ? scoreManager.CurrentScore : 0);
+
+                    Debug.Log(
+                        "[BubbleShooter] Level Failed " +
+                        "(bubbles reached the bottom).");
+
+                    if (gameplayUI != null)
+                    {
+                        gameplayUI.ShowLosePanel(
+                            scoreManager != null
+                                ? scoreManager.CurrentScore
+                                : 0);
+                    }
+
                     yield break;
                 }
             }
 
-            // 6. Lose check (danger row)
-            if (levelManager != null && levelManager.CheckLoseCondition())
+            // 6. Check the danger row.
+            if (levelManager != null &&
+                levelManager.CheckLoseCondition())
             {
                 SetState(GameState.Lose);
+
                 Debug.Log("[BubbleShooter] Level Failed.");
-                if (gameplayUI != null) gameplayUI.ShowLosePanel(scoreManager != null ? scoreManager.CurrentScore : 0);
+
+                if (gameplayUI != null)
+                {
+                    gameplayUI.ShowLosePanel(
+                        scoreManager != null
+                            ? scoreManager.CurrentScore
+                            : 0);
+                }
+
                 yield break;
             }
 
-            // 7. Shooter ki bubble ko grid ke maujooda colors mein se rakho
+            // 7. Refresh the shooter's colors.
             RefreshShooterColors();
 
-            // Ready for next shot
+            // Ready for the next shot.
             SetState(GameState.Ready);
         }
 
-        /// <summary>Is level mein kitne misses ki ijazat hai (0 = koi limit nahi).</summary>
         private int GetMaxMisses()
         {
-            if (levelManager == null || levelManager.CurrentLevelData == null) return 0;
-            return levelManager.CurrentLevelData.maximumMissedShots;
+            if (levelManager == null ||
+                levelManager.CurrentLevelData == null)
+            {
+                return fallbackMaxMisses;
+            }
+
+            int max = levelManager.CurrentLevelData.maximumMissedShots;
+
+            return max > 0 ? max : fallbackMaxMisses;
         }
 
         private void UpdateMissesUI()
         {
             int max = GetMaxMisses();
 
-            if (gameplayUI != null) gameplayUI.UpdateMissesText(missCount, max);
-            if (missIndicator != null) missIndicator.SetMisses(missCount, max);
+            Debug.Log(
+                $"[MissDebug] Level " +
+                $"{(levelManager != null && levelManager.CurrentLevelData != null ? levelManager.CurrentLevelData.levelNumber : -1)}: " +
+                $"misses {missCount}/{max}, " +
+                $"indicator assigned: {missIndicator != null}, " +
+                $"indicator active: {(missIndicator != null && missIndicator.gameObject.activeInHierarchy)}");
+
+            if (gameplayUI != null)
+                gameplayUI.UpdateMissesText(missCount, max);
+
+            if (missIndicator != null)
+                missIndicator.SetMisses(missCount, max);
         }
 
-        /// <summary>
-        /// Pops ke baad kuch colors grid se khatam ho sakte hain:
-        /// shooter ki current AUR next bubble ko grid ke maujooda colors mein se rakho.
-        /// (Size ShooterController khud grid ke diameter ke mutabiq rakhta hai.)
-        /// </summary>
         private void RefreshShooterColors()
         {
-            if (shooterController == null) return;
-            shooterController.EnsureColorsInGrid();
+            if (shooterController != null)
+                shooterController.EnsureColorsInGrid();
+        }
+        private void ShowCPAd()
+        {
+            if (CheckCpAd.instance != null)
+            {
+                Debug.Log("[CPADS] Requesting CP ad.");
+
+                CheckCpAd.instance.CallAd();
+            }
+            else
+            {
+                Debug.LogWarning(
+                    "[CPADS] CheckCpAd instance is NULL.");
+            }
         }
 
         // ---------------------------------------------------------------
@@ -424,48 +727,76 @@ namespace BubbleShooter.Core
 
         public void PauseGame()
         {
-            if (currentState == GameState.Win || currentState == GameState.Lose) return;
+            if (currentState == GameState.Win ||
+                currentState == GameState.Lose ||
+                currentState == GameState.Paused)
+            {
+                return;
+            }
+
+            Debug.Log("[CPADS] Pause clicked.");
+
+            ShowCPAd();
 
             SetState(GameState.Paused);
+
+            if (gameplayUI != null)
+                gameplayUI.ShowPausePanel(true);
+
+            if (aimController != null)
+                aimController.HideAimLine();
+
             Time.timeScale = 0f;
-            if (gameplayUI != null) gameplayUI.ShowPausePanel(true);
-            if (aimController != null) aimController.HideAimLine();
         }
 
         public void ResumeGame()
         {
             Time.timeScale = 1f;
-            if (gameplayUI != null) gameplayUI.ShowPausePanel(false);
+
+            if (gameplayUI != null)
+                gameplayUI.ShowPausePanel(false);
+
             SetState(GameState.Ready);
         }
 
-        /// <summary>Isi level ko dobara shuru karo.</summary>
         public void RetryLevel()
         {
             Debug.Log("[BubbleShooter] Retry clicked.");
-            StartLevel(false);   // LevelManager.LoadLevel() current level dobara load karta hai
+            StartLevel(false);
         }
 
         public void ReturnToHome()
         {
+            Debug.Log("[CPADS] Home clicked.");
+
+            ShowCPAd();
+
             Time.timeScale = 1f;
-            Debug.Log("[BubbleShooter] Returning to MainMenu.");
+
             SceneManager.LoadScene("MainMenu");
         }
 
-        /// <summary>Agle level par jao. Aakhri level ke baad Level 1 par wapas.</summary>
         public void NextLevel()
         {
-            Debug.Log("[BubbleShooter] Next Level clicked.");
+            Debug.Log("[CPADS] Next Level clicked.");
 
-            if (levelManager != null && levelManager.LoadNextLevel())
+            ShowCPAd();
+
+            Time.timeScale = 1f;
+
+            if (levelManager != null &&
+                levelManager.LoadNextLevel())
             {
-                StartLevel(true);   // LoadNextLevel ne level pehle hi load kar diya
+                StartLevel(true);
             }
             else
             {
-                Debug.Log("[BubbleShooter] All levels complete. Restarting from Level 1.");
-                if (levelManager != null) levelManager.LoadFirstLevel();
+                Debug.Log(
+                    "[BubbleShooter] All levels complete. Restarting Level 1.");
+
+                if (levelManager != null)
+                    levelManager.LoadFirstLevel();
+
                 StartLevel(true);
             }
         }

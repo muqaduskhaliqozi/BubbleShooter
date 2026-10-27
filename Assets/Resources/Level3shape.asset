@@ -10,6 +10,30 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 69405e913f1ed2a4189fcf7f91c5c8d5, type: 3}
-  m_Name: ringshape
+  m_Name: Level3shape
   m_EditorClassIdentifier: 
-  pattern: "XXXXXXX\r\nXX.....XX\r\r\r\nXXXXXXX\nXX.....XX\nXXXXXXX"
+  pattern: '...111.....222...
+
+    ..11111...22222..
+
+    .1111111.2222222.
+
+    11111111222222222
+
+    11113334442222222
+
+    .133333444442222.
+
+    ..3333444455555..
+
+    ...33444555566...
+
+    ....444555566....
+
+    .....4455566.....
+
+    ......45567......
+
+    .......567.......
+
+    ........7........'

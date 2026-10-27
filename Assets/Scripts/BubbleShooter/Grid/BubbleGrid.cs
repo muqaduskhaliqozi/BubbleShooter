@@ -24,6 +24,13 @@ namespace BubbleShooter.Grid
         // Har baar ShiftRowsDown par toggle hota hai, taake bubbles seedhi neeche jayein
         private int rowParityShift = 0;
 
+        // ---- Inspector wali asli (default) layout, taake baaqi levels par wapas aa sakein ----
+        private int defaultRows;
+        private int defaultColumns;
+        private float defaultDiameter;
+        private bool defaultStagger;
+        private bool defaultsSaved;
+
         // ---- Horizontal row movement (moving targets) ----
         private float[] rowOffsets;          // har row ka abhi ka x-offset (world units)
         private float[] rowDirections;       // har row ki direction: +1 (dayen) ya -1 (bayen)
@@ -31,6 +38,10 @@ namespace BubbleShooter.Grid
         private float rowMotionSpeed;
         private bool alternateRowDirections = true;
         private bool rowMotionPaused;
+
+        // Alternate OFF ho to sab rows yeh ek shared offset/direction use karti hain
+        private float sharedOffset = 0f;
+        private float sharedDirection = 1f;
 
         public int MaxRows => maxRows;
         public int MaxColumns => maxColumns;
@@ -40,9 +51,6 @@ namespace BubbleShooter.Grid
 
         /// <summary>Kya is level mein rows horizontally hil rahi hain?</summary>
         public bool IsRowMotionEnabled => rowMotionEnabled;
-        // Alternate OFF ho to sab rows yeh ek shared offset/direction use karti hain
-        private float sharedOffset = 0f;
-        private float sharedDirection = 1f;
 
         /// <summary>true karne par rows ki motion ruk jati hai (jaise nayi row ki animation ke dauran).</summary>
         public bool RowMotionPaused
@@ -53,7 +61,43 @@ namespace BubbleShooter.Grid
 
         private void Awake()
         {
+            SaveDefaults();
             InitializeGrid(maxRows, maxColumns);
+        }
+
+        // ---------------------------------------------------------------
+        // Per-level layout (columns, bubble size, zigzag)
+        // ---------------------------------------------------------------
+
+        private void SaveDefaults()
+        {
+            if (defaultsSaved) return;
+
+            defaultRows = maxRows;
+            defaultColumns = maxColumns;
+            defaultDiameter = bubbleDiameter;
+            defaultStagger = staggerRows;
+            defaultsSaved = true;
+        }
+
+        /// <summary>
+        /// Is level ke liye columns, bubble size, rows aur zigzag set karo.
+        /// ClearGrid() ke BAAD aur bubbles spawn karne se PEHLE call karo.
+        /// </summary>
+        public void ConfigureLayout(int columns, float diameter, int rows, bool stagger)
+        {
+            SaveDefaults();
+
+            bubbleDiameter = Mathf.Max(0.1f, diameter);
+            staggerRows = stagger;
+            InitializeGrid(rows, columns);
+        }
+
+        /// <summary>Inspector wali asli layout par wapas jao (jin levels ki alag layout nahi).</summary>
+        public void ResetLayoutToDefault()
+        {
+            SaveDefaults();
+            ConfigureLayout(defaultColumns, defaultDiameter, defaultRows, defaultStagger);
         }
 
         // ---------------------------------------------------------------
@@ -469,6 +513,7 @@ namespace BubbleShooter.Grid
             }
             return null;
         }
+
         /// <summary>
         /// Hit wali bubble ke SEEDHE khali padosiyon mein se shot position ke sab se qareeb cell chunta hai.
         /// Is se bubble hamesha usi bubble ke saath judti hai jise wo lagi.
@@ -554,22 +599,43 @@ namespace BubbleShooter.Grid
         /// Return: kitni bubbles giri (score ke liye).
         /// Matching bubbles pop karne ke foran baad is ko call karo.
         /// </summary>
+
         public int DropFloatingBubbles()
         {
             List<GridCoordinate> floating = GetFloatingCoordinates();
+            int droppedCount = 0;
 
             foreach (var coord in floating)
             {
-                BubbleController b = RemoveBubble(coord.Row, coord.Column);
-                if (b != null)
+                BubbleController b = GetBubble(coord.Row, coord.Column);
+
+                if (b == null)
+                    continue;
+
+                // Rope/locked bubble ko fall nahi karna.
+                if (b.IsLocked)
+                    continue;
+
+                BubbleController removed = RemoveBubble(
+                    coord.Row,
+                    coord.Column
+                );
+
+                if (removed != null)
                 {
-                    Vector2 velocity = new Vector2(Random.Range(-2f, 2f), Random.Range(1f, 3f));
-                    b.Fall(velocity);
+                    Vector2 velocity = new Vector2(
+                        Random.Range(-2f, 2f),
+                        Random.Range(1f, 3f)
+                    );
+
+                    removed.Fall(velocity);
+                    droppedCount++;
                 }
             }
 
-            return floating.Count;
+            return droppedCount;
         }
+
 
         // ---------------------------------------------------------------
         // Horizontal row motion (moving targets)
@@ -621,8 +687,8 @@ namespace BubbleShooter.Grid
         }
 
         /// <summary>
-        /// Har row apni bubbles ke hisab se left wall se right wall ke beech ping-pong karti hai.
-        /// Jis row ki bubbles poori chaurai bhar den, wo hil nahi sakti (jagah nahi).
+        /// Alternate ON: har row apni direction mein ping-pong karti hai.
+        /// Alternate OFF: sab rows ek hi shared offset/direction use karti hain (koi row ulti nahi chalti).
         /// </summary>
         private void UpdateRowMotion(float dt)
         {
@@ -685,7 +751,7 @@ namespace BubbleShooter.Grid
 
                 if (alternateRowDirections)
                 {
-                    // Purana tareeqa: har row apni direction mein ping-pong karti hai
+                    // Har row apni direction mein ping-pong karti hai
                     offset = rowOffsets[r];
 
                     if (uppers[r] - lowers[r] < 0.001f)
@@ -716,8 +782,8 @@ namespace BubbleShooter.Grid
 
                 rowOffsets[r] = offset;
 
-                int cols = GetColumnCountForRow(r);
-                for (int c = 0; c < cols; c++)
+                int rowCols = GetColumnCountForRow(r);
+                for (int c = 0; c < rowCols; c++)
                 {
                     BubbleController b = grid[r, c];
                     if (b != null)
@@ -725,6 +791,7 @@ namespace BubbleShooter.Grid
                 }
             }
         }
+
         // ---------------------------------------------------------------
         // New rows from the top
         // ---------------------------------------------------------------
@@ -755,7 +822,7 @@ namespace BubbleShooter.Grid
                     rowDirections[r] = rowDirections[r - 1];
                 }
 
-                rowOffsets[0] = 0f;
+                rowOffsets[0] = alternateRowDirections ? 0f : sharedOffset;
                 rowDirections[0] = alternateRowDirections ? -rowDirections[1] : rowDirections[1];
             }
 

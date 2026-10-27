@@ -25,6 +25,32 @@ namespace BubbleShooter.Level
         public bool alternateDirections = true;
     }
 
+    /// <summary>
+    /// Kisi level ki alag grid layout: columns, bubble ka size, rows aur zigzag.
+    /// Jo level yahan na ho, wo BubbleGrid ki Inspector wali layout use karta hai.
+    /// </summary>
+    [Serializable]
+    public class LevelLayoutEntry
+    {
+        public BubbleLevelData level;
+
+        [Tooltip("Grid ke columns. 16 = chhoti bubbles ka bada grid.")]
+        [Min(2)] public int columns = 16;
+
+        [Tooltip("ON: bubble ka size screen ki chaurai se khud nikalta hai (tamam phones par fit). " +
+                 "OFF: neeche wala Bubble Diameter use hota hai.")]
+        public bool fitToScreenWidth = true;
+
+        [Tooltip("Sirf tab use hota hai jab Fit To Screen Width OFF ho.")]
+        [Min(0.1f)] public float bubbleDiameter = 0.37f;
+
+        [Tooltip("Grid ki total rows. Chhoti bubbles mein zyada rows aati hain.")]
+        [Min(2)] public int maxRows = 28;
+
+        [Tooltip("ON: zigzag (classic bubble shooter). OFF: seedhi square grid.")]
+        public bool stagger = true;
+    }
+
     public class LevelManager : MonoBehaviour
     {
         [Header("References")]
@@ -43,11 +69,12 @@ namespace BubbleShooter.Level
         [Header("Level Assets - Assign In Order")]
         [SerializeField] private BubbleLevelData[] levels;
         [SerializeField] private BubbleLevelData currentLevelData;
+
         [Header("Debug (sirf Editor mein)")]
         [Tooltip("ON karo to game seedha neeche likhe level se shuru hoga.")]
         [SerializeField] private bool useDebugStartLevel = false;
-        [Tooltip("1 = pehla level, 6 = chhatha level.")]
-        [SerializeField] private int debugStartLevelNumber = 6;
+        [Tooltip("1 = pehla level, 7 = satwa level.")]
+        [SerializeField] private int debugStartLevelNumber = 7;
 
         [Header("Level Shapes (optional)")]
         [Tooltip("Jis level ka shape yahan likha ho, uski starting bubbles us shape mein lagti hain. " +
@@ -64,6 +91,14 @@ namespace BubbleShooter.Level
                  "Rows ko hilne ke liye jagah chahiye: level mein activeColumns grid ke Max Columns se kam rakho.")]
         [SerializeField] private LevelMotionEntry[] levelMotions;
 
+        [Header("Layout (bubble size / columns / zigzag per level)")]
+        [Tooltip("Jis level ko yahan likha jaye, uski grid layout (columns, bubble size, zigzag) alag hoti hai. " +
+                 "Jo level yahan na ho, wo BubbleGrid ki Inspector wali layout use karta hai.")]
+        [SerializeField] private LevelLayoutEntry[] levelLayouts;
+        [Tooltip("Screen ke dono kinaron par khali jagah (world units). Sab levels par ek saath lagta hai. 0.18 theek rehta hai.")]
+        [Min(0f)]
+        [SerializeField] private float screenSideMargin = 0.18f;
+
         [Header("Color Layout")]
         [Tooltip("Ek jaisi bubbles ka gucha (group) zyada se zyada kitna bada ho. " +
                  "Shuru mein har bubble kam az kam 1 saathi ke saath hoti hai, koi akeli nahi.")]
@@ -78,6 +113,9 @@ namespace BubbleShooter.Level
         private int shapeWidth;
         // Poore shape ki rows, aane ki tarteeb mein (sab se neeche wali row pehle). Shape dobara dohrane ke liye.
         private readonly List<string> shapeLoopLines = new List<string>();
+
+        // Main menu se wapas aane par isi level se shuru karne ke liye
+        private const string SavedLevelKey = "BubbleShooter_SavedLevelIndex";
 
         private int currentLevelIndex;
         private int pendingRowsRemaining;
@@ -96,9 +134,9 @@ namespace BubbleShooter.Level
         public bool HasNextLevel => levels != null && currentLevelIndex + 1 < levels.Length;
 
         public void Initialize(
-    BubbleGrid grid,
-    GameObject prefab,
-    BubbleLevelData levelData = null)
+            BubbleGrid grid,
+            GameObject prefab,
+            BubbleLevelData levelData = null)
         {
             bubbleGrid = grid;
             bubblePrefab = prefab;
@@ -113,6 +151,14 @@ namespace BubbleShooter.Level
                 if (currentLevelIndex < 0)
                     currentLevelIndex = 0;
 
+                // Main menu se wapas aane par wahi level jahan chhora tha
+                if (levelData == null)
+                {
+                    int saved = PlayerPrefs.GetInt(SavedLevelKey, currentLevelIndex);
+                    currentLevelIndex = Mathf.Clamp(saved, 0, levels.Length - 1);
+                    currentLevelData = levels[currentLevelIndex];
+                }
+
 #if UNITY_EDITOR
                 if (useDebugStartLevel)
                 {
@@ -122,6 +168,92 @@ namespace BubbleShooter.Level
 #endif
             }
         }
+
+        [Header("Level 10 Lock Patches")]
+        [Tooltip("Ek patch mein kitni bubbles locked hongi (beech wali + uske padosi).")]
+        [Range(1, 7)]
+        [SerializeField] private int lockPatchSize = 5;
+
+        private void ApplyLevelTenLockPatches()
+        {
+            // Locks sirf Level 10 par.
+            if (currentLevelData == null || currentLevelData.levelNumber != 10)
+                return;
+
+            if (bubbleGrid == null)
+                return;
+
+            // Patch ke beech ki jagah: (row, x). x = 0 left kinara, 1 right kinara.
+            // Inhe badal kar patches ki jagah badal sakte hain.
+            float[,] centers =
+            {
+        { 2f, 0.30f },
+        { 3f, 0.72f },
+        { 6f, 0.18f },
+        { 7f, 0.55f },
+        { 10f, 0.80f }
+    };
+
+            List<BubbleController> all = bubbleGrid.GetAllBubbles();
+            HashSet<BubbleController> locked = new HashSet<BubbleController>();
+            int patchesApplied = 0;
+
+            for (int p = 0; p < centers.GetLength(0); p++)
+            {
+                float targetRow = centers[p, 0];
+                float targetX = centers[p, 1];
+
+                // Is jagah ke sab se qareeb maujood bubble dhoondo (row 0 chhor kar)
+                BubbleController center = null;
+                float best = float.MaxValue;
+
+                foreach (BubbleController b in all)
+                {
+                    if (b == null || b.GridPosition.Row < 1) continue;
+
+                    int row = b.GridPosition.Row;
+                    int cols = bubbleGrid.GetColumnCountForRow(row);
+                    float x = (b.GridPosition.Column + 0.5f) / Mathf.Max(1, cols);
+
+                    float score = Mathf.Abs(row - targetRow) * 2f +
+                                  Mathf.Abs(x - targetX) * 10f;
+
+                    if (score < best)
+                    {
+                        best = score;
+                        center = b;
+                    }
+                }
+
+                if (center == null) continue;
+
+                // Beech wali bubble + uske padosi
+                List<BubbleController> patch = new List<BubbleController> { center };
+
+                foreach (GridCoordinate n in bubbleGrid.GetNeighbors(center.GridPosition))
+                {
+                    BubbleController nb = bubbleGrid.GetBubble(n);
+                    if (nb != null && nb.GridPosition.Row >= 1 && !patch.Contains(nb))
+                        patch.Add(nb);
+                }
+
+                int count = 0;
+                foreach (BubbleController b in patch)
+                {
+                    if (count >= lockPatchSize) break;
+                    if (locked.Contains(b)) continue;
+
+                    b.SetLocked(1);
+                    locked.Add(b);
+                    count++;
+                }
+
+                if (count > 0) patchesApplied++;
+            }
+
+            Debug.Log($"[LevelManager] Level 10: {patchesApplied} lock patches, {locked.Count} locked bubbles.");
+        }
+
 
         public void LoadLevel(BubbleLevelData levelData = null)
         {
@@ -153,8 +285,29 @@ namespace BubbleShooter.Level
                 return;
             }
 
-            // Do not resize the grid for individual levels.
+            // Purani bubbles hatao (purani layout ke hisaab se)
             bubbleGrid.ClearGrid();
+
+            // Is level ki grid layout (columns / bubble size / zigzag)
+            LevelLayoutEntry layout = GetLayoutFor(currentLevelData);
+            if (layout != null)
+            {
+                float diameter = layout.fitToScreenWidth
+                    ? CalculateFitDiameter(layout)
+                    : layout.bubbleDiameter;
+
+                bubbleGrid.ConfigureLayout(
+                    layout.columns, diameter, layout.maxRows, layout.stagger);
+
+                Debug.Log(
+                    $"[LevelManager] Level {currentLevelData.levelNumber}: layout " +
+                    $"{layout.columns} columns, diameter {diameter:F3}, " +
+                    $"{layout.maxRows} rows, zigzag {layout.stagger}.");
+            }
+            else
+            {
+                bubbleGrid.ResetLayoutToDefault();
+            }
 
             // Is level mein rows hilni chahiyen ya nahi
             ApplyRowMotionFor(currentLevelData);
@@ -217,11 +370,50 @@ namespace BubbleShooter.Level
 
             // Koi bubble akeli na rahe
             FixSingletons(GetAllBubbleCoordinates());
+            ApplyLevelTenLockPatches();
 
             if (gameplayUI != null)
                 gameplayUI.UpdateLevelText(currentLevelData.levelNumber);
 
+            // Is level ko yaad rakho (Home dabane ke baad yahin se shuru hoga)
+            PlayerPrefs.SetInt(SavedLevelKey, currentLevelIndex);
+            PlayerPrefs.Save();
+
             OnLevelLoaded?.Invoke(currentLevelData);
+        }
+
+        // =====================================================
+        //  LAYOUT (bubble size / columns / zigzag per level)
+        // =====================================================
+
+        private LevelLayoutEntry GetLayoutFor(BubbleLevelData level)
+        {
+            if (levelLayouts == null || level == null) return null;
+
+            foreach (LevelLayoutEntry entry in levelLayouts)
+            {
+                if (entry != null && entry.level == level)
+                    return entry;
+            }
+            return null;
+        }
+
+        /// <summary>Camera ki chaurai se bubble ka diameter nikalta hai taake columns screen mein poore aayein.</summary>
+        private float CalculateFitDiameter(LevelLayoutEntry layout)
+        {
+            Camera cam = Camera.main;
+
+            if (cam == null || !cam.orthographic)
+            {
+                Debug.LogWarning("[LevelManager] Orthographic Main Camera nahi mila, manual Bubble Diameter use ho raha hai.");
+                return layout.bubbleDiameter;
+            }
+
+            float worldWidth = cam.orthographicSize * 2f * cam.aspect;
+            float usable = worldWidth - screenSideMargin * 2f;
+
+            // Grid ki chaurai = (columns - 1) x diameter + ek diameter (kinare ki bubbles ke aadhe hisse)
+            return Mathf.Clamp(usable / layout.columns, 0.1f, 1f);
         }
 
         // =====================================================
@@ -322,8 +514,7 @@ namespace BubbleShooter.Level
             {
                 Debug.LogWarning(
                     $"[LevelManager] Shape '{shape.name}' mein {floating.Count} bubbles upar se judi nahi hain. " +
-                    "Pehle pop par ye gir jayengi. Shape ko aise badlo ke har bubble row 0 se judi ho " +
-                    "(square layout mein seedhi jurni chahiye, tirchi nahi).");
+                    "Pehle pop par ye gir jayengi. Shape ko aise badlo ke har bubble row 0 se judi ho.");
             }
         }
 
@@ -883,6 +1074,19 @@ namespace BubbleShooter.Level
             uiSubscribed = false;
         }
 
+        private void ShowCPAd()
+        {
+            if (CheckCpAd.instance != null)
+            {
+                Debug.Log("[LevelManager] Requesting CP Ad.");
+                CheckCpAd.instance.CallAd();
+            }
+            else
+            {
+                Debug.LogWarning("[LevelManager] CheckCpAd instance is NULL.");
+            }
+        }
+
         /// <summary>Level complete hone par call karo (score optional).</summary>
         public void ShowWinPanel(int finalScore = 0)
         {
@@ -906,16 +1110,23 @@ namespace BubbleShooter.Level
         }
 
         /// <summary>Win panel -> Next button.</summary>
+        /// <summary>Win panel -> Next button.</summary>
         public void OnNextLevelButton()
         {
+            Debug.Log("[CPADS] Next button method called.");
+
+            ShowCPAd();
+
             ResetForNewRun();
 
             if (!LoadNextLevel())
             {
-                // Aakhri level thi -> main menu
+                Debug.Log("[CPADS] No next level. Loading MainMenu.");
                 SceneManager.LoadScene(mainMenuSceneName);
             }
         }
+
+
 
         /// <summary>Win / Lose / Pause panel -> Retry button.</summary>
         public void OnRetryButton()
@@ -925,12 +1136,19 @@ namespace BubbleShooter.Level
         }
 
         /// <summary>Win / Lose / Pause panel -> Home button.</summary>
+
         public void OnHomeButton()
         {
+            Debug.Log("[CPADS] Home button method called.");
+
+            ShowCPAd();
+
             StopAllCoroutines();
             Time.timeScale = 1f;
+
             SceneManager.LoadScene(mainMenuSceneName);
         }
+
 
         /// <summary>Pause panel -> Resume button.</summary>
         public void OnResumeButton()
@@ -942,7 +1160,14 @@ namespace BubbleShooter.Level
         /// <summary>TopBar ke PauseButton.</summary>
         public void OnPauseButton()
         {
-            if (gameplayUI != null) gameplayUI.ShowPausePanel(true);
+            Debug.Log("[CPADS] Pause button method called.");
+
+            // Request ad before pausing the game.
+            ShowCPAd();
+
+            if (gameplayUI != null)
+                gameplayUI.ShowPausePanel(true);
+
             Time.timeScale = 0f;
         }
     }

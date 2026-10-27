@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 69405e913f1ed2a4189fcf7f91c5c8d5, type: 3}
+  m_Name: level8shape
+  m_EditorClassIdentifier: 
+  pattern: '5555444444445555
+
+    5554433333344555
+
+    5544333333334455
+
+    5443322222233445
+
+    4433222222223344
+
+    4332214444221334
+
+    3322114444221133
+
+    3221115555111123
+
+    2211115555111122
+
+    2111225555221112
+
+    1112234444322111
+
+    1223344444332211
+
+    2233442222443322
+
+    2334422222444332
+
+    3344422222444433
+
+    3444433333444443
+
+    4444555555444444'

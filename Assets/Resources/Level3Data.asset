@@ -13,17 +13,17 @@ MonoBehaviour:
   m_Name: Level3Data
   m_EditorClassIdentifier: 
   levelNumber: 3
-  startingRows: 6
-  activeColumns: 6
-  gridColumns: 8
-  pendingRows: 8
-  shotsPerNewRow: 1
-  availableColors: 0000000001000000020000000300000004000000
+  startingRows: 16
+  activeColumns: 18
+  gridColumns: 16
+  pendingRows: 0
+  shotsPerNewRow: 2
+  availableColors: 00000000010000000200000003000000040000000600000007000000
   minimumMatchCount: 2
   maximumMissedShots: 5
-  rows: 7
+  rows: 18
   columns: 5
   enableMissRows: 1
   bubbleSpeed: 14
-  dangerRow: 10
+  dangerRow: 28
   initialGridColors: 

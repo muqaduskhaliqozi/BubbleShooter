@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0694cc86e9942f84eace86643d719f78, type: 3}
+  m_Name: Level7Data
+  m_EditorClassIdentifier: 
+  levelNumber: 7
+  startingRows: 11
+  activeColumns: 16
+  gridColumns: 16
+  pendingRows: 0
+  shotsPerNewRow: 3
+  availableColors: 000000000400000003000000020000000500000001000000
+  minimumMatchCount: 2
+  maximumMissedShots: 8
+  rows: 4
+  columns: 4
+  enableMissRows: 0
+  bubbleSpeed: 14
+  dangerRow: 26
+  initialGridColors: 

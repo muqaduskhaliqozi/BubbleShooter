@@ -43,6 +43,11 @@ namespace BubbleShooter.UI
 
         private void Awake()
         {
+            if (instructionText != null)
+            {
+                instructionText.gameObject.SetActive(true);
+                instructionText.enabled = true;
+            }
             if (pauseButton != null)
                 pauseButton.onClick.AddListener(() => OnPauseClicked?.Invoke());
 
@@ -64,6 +69,7 @@ namespace BubbleShooter.UI
                 pauseRestartButton.onClick.AddListener(() => OnRetryClicked?.Invoke());
             if (pauseHomeButton != null)
                 pauseHomeButton.onClick.AddListener(() => OnHomeClicked?.Invoke());
+      
 
             WarnAboutMissingReferences();
         }
@@ -129,7 +135,10 @@ namespace BubbleShooter.UI
             if (instructionText != null)
             {
                 instructionText.text = text;
-                instructionText.gameObject.SetActive(visible);
+
+                // Instruction ko hamesha visible rakho.
+                instructionText.gameObject.SetActive(true);
+                instructionText.enabled = true;
             }
         }
 

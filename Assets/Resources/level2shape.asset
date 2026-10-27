@@ -1,0 +1,15 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 69405e913f1ed2a4189fcf7f91c5c8d5, type: 3}
+  m_Name: level2shape
+  m_EditorClassIdentifier: 
+  pattern: "\r\n........1........\r\n.......111.......\r\n......11111......\r\n.....1112222.....\r\n....11112222.....\r\n...3333222244....\r\n..333344442244...\r\n.33334444445555..\r\n33334444555555...\r\n.3333444455555...\r\n..33334445555....\r\n...6666444777....\r\n....66667777.....\r\n.....666777......\r\n......666........\r\n.......7.........\r\n.................\r\n\r"

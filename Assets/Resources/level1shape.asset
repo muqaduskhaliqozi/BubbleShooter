@@ -10,14 +10,38 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 69405e913f1ed2a4189fcf7f91c5c8d5, type: 3}
-  m_Name: triangelshape
+  m_Name: level1shape
   m_EditorClassIdentifier: 
-  pattern: 'XXXXXXXXX
+  pattern: '213456727654312
 
-    .XXXXXXX.
+    13456722765431
 
-    ..XXXXX..
+    134567212765431
 
-    ...XXX...
+    34567211276543
 
-    ....X....'
+    345672131276543
+
+    45672133127654
+
+    456721343127654
+
+    56721344312765
+
+    567213454312765
+
+    67213455431276
+
+    672134565431276
+
+    72134566543127
+
+    721345676543127
+
+    21345677654312
+
+    213456777654312
+
+    13456777765431
+
+    134567777765431'
