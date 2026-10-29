@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0694cc86e9942f84eace86643d719f78, type: 3}
   m_Name: Level9Data
   m_EditorClassIdentifier: 
-  levelNumber: 1
+  levelNumber: 9
   startingRows: 4
   activeColumns: 4
   gridColumns: 8

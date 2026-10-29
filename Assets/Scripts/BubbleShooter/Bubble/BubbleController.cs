@@ -364,21 +364,53 @@ namespace BubbleShooter.Bubble
 
         public void Pop(Action onComplete = null)
         {
+            Pop(true, onComplete);
+        }
+
+        /// <summary>
+        /// Bubble phodo. withBurst = false ho to sirf halka "phus" (ghalat shot wali bubble).
+        /// </summary>
+        public void Pop(bool withBurst, Action onComplete = null)
+        {
             isAttached = false;
 
             if (circleCollider != null)
                 circleCollider.enabled = false;
 
+            StopScaleAnim();
+
+            float diameter = GetWorldDiameter();
+            UnityEngine.Color c = BubbleColorUtility.GetColorValue(color);
+
+            if (FX.GameFX.Instance != null)
+            {
+                if (withBurst)
+                    FX.GameFX.Instance.PopBurst(transform.position, c, diameter);
+                else
+                    FX.GameFX.Instance.Fizzle(transform.position, c, diameter);
+            }
+
             StartCoroutine(PopRoutine(onComplete));
+        }
+
+        /// <summary>Screen par bubble ka diameter (world units).</summary>
+        public float GetWorldDiameter()
+        {
+            if (spriteRenderer != null && spriteRenderer.sprite != null)
+            {
+                float s = Mathf.Abs(transform.lossyScale.x);
+                return spriteRenderer.sprite.bounds.size.x * s;
+            }
+            return 0.4f;
         }
 
         private IEnumerator PopRoutine(Action onComplete)
         {
-            float duration = 0.15f;
+            // 1) halka sa phoolna, 2) phir sikud kar ghaib
+            float duration = 0.16f;
             float elapsed = 0f;
 
             Vector3 startScale = transform.localScale;
-            Vector3 targetScale = startScale * 1.3f;
 
             UnityEngine.Color startColor =
                 spriteRenderer != null
@@ -388,28 +420,30 @@ namespace BubbleShooter.Bubble
             while (elapsed < duration)
             {
                 elapsed += Time.deltaTime;
-                float t = elapsed / duration;
+                float t = Mathf.Clamp01(elapsed / duration);
 
-                transform.localScale =
-                    Vector3.Lerp(startScale, targetScale, t);
+                float s = t < 0.35f
+                    ? Mathf.Lerp(1f, 1.28f, t / 0.35f)
+                    : Mathf.Lerp(1.28f, 0.2f, (t - 0.35f) / 0.65f);
+
+                transform.localScale = startScale * s;
+
+                float a = 1f - t * t;
 
                 if (spriteRenderer != null)
                 {
-                    UnityEngine.Color c = startColor;
-                    c.a = Mathf.Lerp(1f, 0f, t);
+                    UnityEngine.Color c = UnityEngine.Color.Lerp(startColor, UnityEngine.Color.white, t * 0.6f);
+                    c.a = a;
                     spriteRenderer.color = c;
                 }
 
                 if (glossRenderer != null)
-                {
-                    glossRenderer.color = new UnityEngine.Color(
-                        1f, 1f, 1f, Mathf.Lerp(1f, 0f, t));
-                }
+                    glossRenderer.color = new UnityEngine.Color(1f, 1f, 1f, a);
 
                 if (lockRenderer != null)
                 {
                     UnityEngine.Color lockColor = lockRenderer.color;
-                    lockColor.a = Mathf.Lerp(1f, 0f, t);
+                    lockColor.a = a;
                     lockRenderer.color = lockColor;
                 }
 
@@ -430,6 +464,11 @@ namespace BubbleShooter.Bubble
             if (circleCollider != null)
                 circleCollider.enabled = false;
 
+            StopScaleAnim();
+
+            // Girti bubbles baaqi bubbles ke upar dikhein
+            SetSortingOrder(5);
+
             StartCoroutine(
                 FallRoutine(initialVelocity, onComplete));
         }
@@ -438,14 +477,21 @@ namespace BubbleShooter.Bubble
             Vector2 initialVelocity,
             Action onComplete)
         {
-            float gravity = 25f;
+            float gravity = 22f;
             Vector2 velocity = initialVelocity;
 
             float elapsed = 0f;
-            float lifetime = 1.5f;
+            float lifetime = 1.6f;
 
             float rotSpeed = UnityEngine.Random.Range(
                 -180f, 180f);
+
+            Camera cam = Camera.main;
+            float bottomY = cam != null && cam.orthographic
+                ? cam.transform.position.y - cam.orthographicSize
+                : -5f;
+
+            bool burst = false;
 
             while (elapsed < lifetime &&
                    transform.position.y > -15f)
@@ -459,11 +505,122 @@ namespace BubbleShooter.Bubble
                 transform.Rotate(
                     0f, 0f, rotSpeed * Time.deltaTime);
 
+                // Screen ke neeche pohanch kar chhota sa "pop"
+                if (!burst && transform.position.y < bottomY + 0.35f)
+                {
+                    burst = true;
+                    if (FX.GameFX.Instance != null)
+                    {
+                        FX.GameFX.Instance.PopBurst(
+                            new Vector3(transform.position.x, bottomY + 0.35f, 0f),
+                            BubbleColorUtility.GetColorValue(color),
+                            GetWorldDiameter() * 0.8f);
+                    }
+                    break;
+                }
+
                 yield return null;
             }
 
             onComplete?.Invoke();
             Destroy(gameObject);
+        }
+
+        // ---------------------------------------------------------------
+        // Scale animations (intro, landing squash, neighbour ripple)
+        // ---------------------------------------------------------------
+
+        private Coroutine scaleAnim;
+        private Vector3 scaleAnimBase;
+
+        /// <summary>Chalti scale animation rok kar asli scale wapas lagao.</summary>
+        public void StopScaleAnim()
+        {
+            if (scaleAnim != null)
+            {
+                StopCoroutine(scaleAnim);
+                scaleAnim = null;
+                transform.localScale = scaleAnimBase;
+            }
+        }
+
+        /// <summary>Level shuru: bubble 0 se "pop" ho kar aati hai.</summary>
+        public void PlayIntro(float delay)
+        {
+            StartScaleAnim(IntroRoutine(Mathf.Max(0f, delay)));
+        }
+
+        /// <summary>Shot bubble lagne par squash (dabna) aur wapas uchhalna.</summary>
+        public void PlayLandSquash()
+        {
+            StartScaleAnim(SquashRoutine(0f, 0.22f, 0.3f));
+        }
+
+        /// <summary>Padosi bubbles ki halki si thartharahat (ripple).</summary>
+        public void PlayJiggle(float delay, float strength)
+        {
+            if (!gameObject.activeInHierarchy || isFalling) return;
+            StartScaleAnim(SquashRoutine(Mathf.Max(0f, delay), Mathf.Clamp(strength, 0f, 0.3f), 0.28f));
+        }
+
+        private void StartScaleAnim(IEnumerator routine)
+        {
+            if (!gameObject.activeInHierarchy) return;
+            StopScaleAnim();
+            scaleAnimBase = transform.localScale;
+            scaleAnim = StartCoroutine(routine);
+        }
+
+        private IEnumerator IntroRoutine(float delay)
+        {
+            transform.localScale = UnityEngine.Vector3.zero;
+
+            float w = 0f;
+            while (w < delay)
+            {
+                w += Time.deltaTime;
+                yield return null;
+            }
+
+            const float dur = 0.32f;
+            float t = 0f;
+            while (t < dur)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                transform.localScale = scaleAnimBase * FX.Ease.OutBack(k, 2.4f);
+                yield return null;
+            }
+
+            transform.localScale = scaleAnimBase;
+            scaleAnim = null;
+        }
+
+        private IEnumerator SquashRoutine(float delay, float strength, float dur)
+        {
+            float w = 0f;
+            while (w < delay)
+            {
+                w += Time.deltaTime;
+                yield return null;
+            }
+
+            float t = 0f;
+            while (t < dur)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                // damped oscillation: pehle chapta, phir lamba, phir normal
+                float osc = Mathf.Sin(k * Mathf.PI * 2.5f) * (1f - k) * strength;
+                transform.localScale = new Vector3(
+                    scaleAnimBase.x * (1f + osc),
+                    scaleAnimBase.y * (1f - osc),
+                    scaleAnimBase.z);
+                yield return null;
+            }
+
+            transform.localScale = scaleAnimBase;
+            scaleAnim = null;
         }
     }
 }

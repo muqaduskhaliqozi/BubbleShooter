@@ -53,6 +53,8 @@ namespace BubbleShooter.Shooter
         public BubbleController NextBubble => nextBubble;
         public bool IsSwapping => swapping;
         public int BubbleSortingOrder => shooterBubbleSortingOrder;
+        public Transform CurrentBubbleAnchor => currentBubblePosition;
+        public Transform NextBubbleAnchor => nextBubblePosition;
 
         public event Action<BubbleController, Vector2> OnBubbleShot;
 
@@ -205,6 +207,7 @@ namespace BubbleShooter.Shooter
                 nextBubble.SetColor(color);
                 FitToGrid(nextBubble, nextBubbleScale);
                 nextBubble.SetSortingOrder(shooterBubbleSortingOrder);
+                nextBubble.PlayIntro(0.05f);
             }
         }
 
@@ -261,6 +264,10 @@ namespace BubbleShooter.Shooter
 
             BubbleController a = currentBubble;
             BubbleController b = nextBubble;
+
+            // Intro / slide animation beech mein ho to pehle rok do
+            a.StopScaleAnim();
+            b.StopScaleAnim();
 
             Vector3 aFrom = a.transform.position;
             Vector3 bFrom = b.transform.position;
@@ -328,6 +335,36 @@ namespace BubbleShooter.Shooter
             swapping = false;
         }
 
+        private IEnumerator SlideToCurrent(BubbleController bubble, Vector3 from, Vector3 fromScale)
+        {
+            swapping = true;
+
+            Vector3 to = currentBubblePosition.position;
+            Vector3 toScale = bubble.transform.localScale;
+            float diameter = bubbleGrid != null ? bubbleGrid.BubbleDiameter : 0.8f;
+
+            const float duration = 0.16f;
+            float t = 0f;
+
+            while (t < duration && bubble != null)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t / duration));
+                float arc = Mathf.Sin(k * Mathf.PI) * diameter * 0.45f;
+                bubble.transform.position = Vector3.Lerp(from, to, k) + Vector3.up * arc;
+                bubble.transform.localScale = Vector3.Lerp(fromScale, toScale, k);
+                yield return null;
+            }
+
+            if (bubble != null)
+            {
+                bubble.transform.position = to;
+                bubble.transform.localScale = toScale;
+            }
+
+            swapping = false;
+        }
+
         private void OnDrawGizmosSelected()
         {
             if (nextBubblePosition == null)
@@ -386,13 +423,17 @@ namespace BubbleShooter.Shooter
                 currentBubble = nextBubble;
 
                 currentBubble.transform.SetParent(transform);
-                currentBubble.transform.position =
-                    currentBubblePosition.position;
+
+                Vector3 from = currentBubble.transform.position;
+                Vector3 fromScale = currentBubble.transform.localScale;
 
                 FitToGrid(currentBubble);
                 currentBubble.SetSortingOrder(shooterBubbleSortingOrder);
 
                 nextBubble = null;
+
+                // Next wali bubble uchhal kar shooter mein aati hai (pehle teleport hoti thi)
+                StartCoroutine(SlideToCurrent(currentBubble, from, fromScale));
             }
             else
             {

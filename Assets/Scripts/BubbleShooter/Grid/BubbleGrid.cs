@@ -268,6 +268,9 @@ namespace BubbleShooter.Grid
                 return;
             }
 
+            // Chalti intro / squash animation pehle rok do, warna galat size naapa jayega.
+            bubble.StopScaleAnim();
+
             // Reset the bubble root scale before measuring its visual size.
             bubble.transform.localScale = Vector3.one;
 
@@ -429,6 +432,72 @@ namespace BubbleShooter.Grid
         }
 
         // ---------------------------------------------------------------
+        // Visual helpers
+        // ---------------------------------------------------------------
+
+        /// <summary>
+        /// Lagne wali bubble ke ird-gird ki bubbles ko lehar (ripple) ki tarah hilao.
+        /// depth 1 = seedhe padosi, depth 2 = unke padosi.
+        /// </summary>
+        public void RippleFrom(GridCoordinate center, float strength = 0.12f, int maxDepth = 2)
+        {
+            if (!IsValidCoordinate(center)) return;
+
+            HashSet<GridCoordinate> visited = new HashSet<GridCoordinate> { center };
+            List<GridCoordinate> ring = new List<GridCoordinate> { center };
+
+            for (int depth = 1; depth <= maxDepth; depth++)
+            {
+                List<GridCoordinate> next = new List<GridCoordinate>();
+                foreach (GridCoordinate c in ring)
+                {
+                    foreach (GridCoordinate n in GetNeighbors(c))
+                    {
+                        if (visited.Contains(n)) continue;
+                        visited.Add(n);
+                        BubbleController b = grid[n.Row, n.Column];
+                        if (b == null) continue;
+                        next.Add(n);
+                        b.PlayJiggle(depth * 0.045f, strength / depth);
+                    }
+                }
+                ring = next;
+                if (ring.Count == 0) break;
+            }
+        }
+
+        /// <summary>Sab se neeche wali bubble ka center Y (koi bubble na ho to null).</summary>
+        public float? GetLowestBubbleY()
+        {
+            float? lowest = null;
+            for (int r = 0; r < maxRows; r++)
+            {
+                for (int c = 0; c < maxColumns; c++)
+                {
+                    if (grid[r, c] == null) continue;
+                    float y = GridToWorldPosition(r, c).y;
+                    if (lowest == null || y < lowest.Value) lowest = y;
+                }
+            }
+            return lowest;
+        }
+
+        /// <summary>Level shuru par bubbles upar se neeche ek ek kar ke "pop" hoti hain.</summary>
+        public void PlayIntroWave(float perRowDelay = 0.035f)
+        {
+            for (int r = 0; r < maxRows; r++)
+            {
+                for (int c = 0; c < maxColumns; c++)
+                {
+                    BubbleController b = grid[r, c];
+                    if (b == null) continue;
+                    float jitter = Mathf.Abs(c - maxColumns * 0.5f) * 0.006f;
+                    b.PlayIntro(r * perRowDelay + jitter);
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------
         // Colors currently present in the grid (shooter colors ke liye)
         // ---------------------------------------------------------------
 
@@ -498,20 +567,27 @@ namespace BubbleShooter.Grid
         /// </summary>
         public BubbleController FindHitBubble(Vector3 pos, float hitRadius)
         {
+            // Sab se qareeb wali bubble (projectile bhi yahi chunti hai)
             float sqrRadius = hitRadius * hitRadius;
+            BubbleController best = null;
+            float bestSqr = float.MaxValue;
             for (int r = 0; r < maxRows; r++)
             {
                 for (int c = 0; c < maxColumns; c++)
                 {
                     BubbleController b = grid[r, c];
-                    if (b == null) continue;
+                    if (b == null || !b.IsAttached) continue;
 
                     Vector2 diff = (Vector2)b.transform.position - (Vector2)pos;
-                    if (diff.sqrMagnitude <= sqrRadius)
-                        return b;
+                    float sq = diff.sqrMagnitude;
+                    if (sq <= sqrRadius && sq < bestSqr)
+                    {
+                        bestSqr = sq;
+                        best = b;
+                    }
                 }
             }
-            return null;
+            return best;
         }
 
         /// <summary>

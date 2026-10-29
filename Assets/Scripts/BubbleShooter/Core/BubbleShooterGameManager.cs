@@ -9,6 +9,7 @@ using BubbleShooter.Matching;
 using BubbleShooter.Level;
 using BubbleShooter.Score;
 using BubbleShooter.UI;
+using BubbleShooter.FX;
 
 namespace BubbleShooter.Core
 {
@@ -48,9 +49,24 @@ namespace BubbleShooter.Core
         [Tooltip("ON: a shot that does not match is removed from the grid.")]
         [SerializeField] private bool removeMissedBubble = true;
 
+        [Header("Danger Line")]
+        [Tooltip("Khatre ki lakeer shooter se kitni upar ho (bubble diameter ke hisaab se). " +
+                 "Koi bubble is lakeer tak pohanche to level fail.")]
+        [SerializeField] private float dangerLineDiameters = 0.6f;
+
+        [Header("Juice")]
+        [SerializeField] private bool enableEffects = true;
+
         private int missCount = 0;
         private bool eventsBound = false;
         private bool swapPressActive;
+
+        // Pause se pehle wali state (resume par wapas). Pehle hamesha Ready ho jati thi,
+        // jis se udti bubble ke dauran dobara shot chal jata tha.
+        private GameState stateBeforePause = GameState.Ready;
+        private bool firstShotTaken;
+        private float dangerLineY = -3f;
+        private GameplayBackdrop backdrop;
 
         public GameState CurrentState => currentState;
 
@@ -207,6 +223,13 @@ namespace BubbleShooter.Core
             if (aimController != null)
                 aimController.HideAimLine();
 
+            // Retry / Next ke waqt hawa mein udti bubble naye level mein na ja lage
+            foreach (BubbleProjectile p in FindObjectsOfType<BubbleProjectile>())
+            {
+                if (p != null)
+                    Destroy(p.gameObject);
+            }
+
             if (!alreadyLoaded && levelManager != null)
                 levelManager.LoadLevel();
 
@@ -233,12 +256,17 @@ namespace BubbleShooter.Core
             missCount = 0;
             UpdateMissesUI();
 
+            SetupLevelVisuals(true);
+
             SetState(GameState.Ready);
+
+            firstShotTaken = false;
 
             if (gameplayUI != null)
             {
                 gameplayUI.SetInstructionText(
                     "Drag or Click to Aim, Release to Shoot!", true);
+                gameplayUI.ShowInstruction();
             }
 
             if (levelManager != null &&
@@ -248,6 +276,95 @@ namespace BubbleShooter.Core
                     $"[BubbleShooter] Level " +
                     $"{levelManager.CurrentLevelData.levelNumber} started.");
             }
+        }
+
+        // ---------------------------------------------------------------
+        // Visuals (theme, danger line, intro)
+        // ---------------------------------------------------------------
+
+        private void SetupLevelVisuals(bool playIntro)
+        {
+            if (GameFX.Exists)
+                GameFX.Instance.ClearAll();
+
+            dangerLineY = ComputeDangerLineY();
+
+            if (!enableEffects)
+                return;
+
+            int levelNumber =
+                levelManager != null && levelManager.CurrentLevelData != null
+                    ? levelManager.CurrentLevelData.levelNumber
+                    : 1;
+
+            backdrop = GameplayBackdrop.Ensure();
+            backdrop.Apply(levelNumber, bubbleGrid, dangerLineY);
+            UpdateDangerVisual();
+
+            if (shooterController != null)
+                ShooterVisuals.Attach(shooterController, aimController, bubbleGrid);
+
+            if (playIntro && bubbleGrid != null)
+                bubbleGrid.PlayIntroWave();
+
+            if (gameplayUI != null)
+                gameplayUI.ShowLevelBanner(levelNumber, backdrop.CurrentTheme.name);
+        }
+
+        /// <summary>
+        /// Khatre ki lakeer: shooter se thora upar. Pehle dangerRow (28) grid ki
+        /// aakhri row se bhi neeche tha, is liye bubbles shooter ke neeche tak chali jati thin.
+        /// </summary>
+        private float ComputeDangerLineY()
+        {
+            float d = bubbleGrid != null ? bubbleGrid.BubbleDiameter : 0.4f;
+
+            float shooterY = -3.4f;
+            if (shooterController != null && shooterController.CurrentBubbleAnchor != null)
+                shooterY = shooterController.CurrentBubbleAnchor.position.y;
+
+            float line = shooterY + d * dangerLineDiameters;
+
+            // Choti / chauri screens par level shuru se hi lakeer ke paas ho sakta hai:
+            // kam az kam 3 rows ki jagah do, taake level foran fail na ho.
+            if (bubbleGrid != null)
+            {
+                float? lowest = bubbleGrid.GetLowestBubbleY();
+                if (lowest.HasValue)
+                {
+                    float minGap = d * 3f;
+                    if (lowest.Value - d * 0.5f - line < minGap)
+                        line = lowest.Value - d * 0.5f - minGap;
+                }
+            }
+
+            return line;
+        }
+
+        /// <summary>Koi bubble lakeer ko chhoo gayi?</summary>
+        private bool BubblesCrossedDangerLine()
+        {
+            if (bubbleGrid == null) return false;
+            float? lowest = bubbleGrid.GetLowestBubbleY();
+            if (!lowest.HasValue) return false;
+            return lowest.Value - bubbleGrid.BubbleDiameter * 0.5f <= dangerLineY;
+        }
+
+        private void UpdateDangerVisual()
+        {
+            if (backdrop == null || bubbleGrid == null) return;
+
+            float? lowest = bubbleGrid.GetLowestBubbleY();
+            if (!lowest.HasValue)
+            {
+                backdrop.SetDanger(0f);
+                return;
+            }
+
+            float d = bubbleGrid.BubbleDiameter;
+            float gap = lowest.Value - d * 0.5f - dangerLineY;
+            // 4 rows door = 0, lakeer par = 1
+            backdrop.SetDanger(1f - Mathf.Clamp01(gap / (d * 4f)));
         }
 
         // ---------------------------------------------------------------
@@ -367,10 +484,11 @@ namespace BubbleShooter.Core
 
             SetState(GameState.Shooting);
 
-            if (gameplayUI != null)
+            if (!firstShotTaken)
             {
-                gameplayUI.SetInstructionText(
-                    "Drag or Click to Aim, Release to Shoot!", true);
+                firstShotTaken = true;
+                if (gameplayUI != null)
+                    gameplayUI.HideInstruction();
             }
 
             Debug.Log(
@@ -462,6 +580,10 @@ namespace BubbleShooter.Core
                 //    locked (zanjeer wali) sirf unlock hongi.
                 int poppedCount = 0;
                 int unlockedCount = 0;
+                Vector3 popCenter = Vector3.zero;
+                Color popColor = attachedBubble != null
+                    ? BubbleColorUtility.GetColorValue(attachedBubble.Color)
+                    : Color.white;
 
                 foreach (BubbleController bubble in matches)
                 {
@@ -481,19 +603,35 @@ namespace BubbleShooter.Core
                         bubble.GridPosition.Row,
                         bubble.GridPosition.Column);
 
+                    popCenter += bubble.transform.position;
                     bubble.Pop();
                     poppedCount++;
                 }
+
+                if (poppedCount > 0)
+                    popCenter /= poppedCount;
 
                 Debug.Log(
                     $"[BubbleShooter] Match result: {poppedCount} popped, " +
                     $"{unlockedCount} locked bubble(s) only unlocked.");
 
+                int scoreBefore = scoreManager != null ? scoreManager.CurrentScore : 0;
+
                 if (scoreManager != null && poppedCount > 0)
                     scoreManager.AddMatchScore(poppedCount);
 
+                int matchPoints = scoreManager != null ? scoreManager.CurrentScore - scoreBefore : 0;
+
                 // 2. Drop bubbles that are no longer connected to the ceiling.
+                Vector3 dropCenter = Vector3.zero;
+                List<GridCoordinate> floatingNow = bubbleGrid.GetFloatingCoordinates();
+                foreach (GridCoordinate fc in floatingNow)
+                    dropCenter += bubbleGrid.GridToWorldPosition(fc);
+                if (floatingNow.Count > 0)
+                    dropCenter /= floatingNow.Count;
+
                 int fallenCount = bubbleGrid.DropFloatingBubbles();
+                int dropPoints = 0;
 
                 if (fallenCount > 0)
                 {
@@ -501,9 +639,16 @@ namespace BubbleShooter.Core
                         $"[BubbleShooter] Floating bubbles dropped: " +
                         $"{fallenCount}.");
 
+                    // FIX: girne wali bubbles ka apna score (pehle combo counter
+                    // bhi barhta tha, is liye score ajeeb tarah se uchhalta tha)
+                    int before = scoreManager != null ? scoreManager.CurrentScore : 0;
                     if (scoreManager != null)
-                        scoreManager.AddMatchScore(fallenCount);
+                        scoreManager.AddFloatingScore(fallenCount);
+                    dropPoints = scoreManager != null ? scoreManager.CurrentScore - before : 0;
                 }
+
+                PlayMatchFeedback(poppedCount, fallenCount, matchPoints, dropPoints,
+                    popCenter, dropCenter, popColor);
 
                 yield return new WaitForSeconds(0.2f);
 
@@ -550,7 +695,7 @@ namespace BubbleShooter.Core
                         coord.Row,
                         coord.Column);
 
-                    attachedBubble.Pop();
+                    attachedBubble.Pop(false);
                 }
 
                 missCount++;
@@ -593,6 +738,17 @@ namespace BubbleShooter.Core
                 SetState(GameState.Win);
 
                 Debug.Log("[BubbleShooter] Level Complete.");
+
+                // Main Menu ke coin counter ke liye inaam
+                CoinWallet.Add(CoinWallet.CoinsPerLevelWin);
+
+                if (enableEffects)
+                {
+                    if (GameFX.Exists) GameFX.Instance.Shake(0.12f, 0.4f);
+                    if (gameplayUI != null)
+                        gameplayUI.ShowPraise("CLEARED!", new Color(1f, 0.9f, 0.3f));
+                    yield return new WaitForSeconds(0.9f);
+                }
 
                 if (gameplayUI != null)
                 {
@@ -639,10 +795,15 @@ namespace BubbleShooter.Core
                 }
             }
 
-            // 6. Check the danger row.
-            if (levelManager != null &&
-                levelManager.CheckLoseCondition())
+            UpdateDangerVisual();
+
+            // 6. Check the danger row (level ka dangerRow YA shooter ke upar wali lakeer).
+            if ((levelManager != null &&
+                 levelManager.CheckLoseCondition()) ||
+                BubblesCrossedDangerLine())
             {
+                if (enableEffects && GameFX.Exists)
+                    GameFX.Instance.Shake(0.15f, 0.35f);
                 SetState(GameState.Lose);
 
                 Debug.Log("[BubbleShooter] Level Failed.");
@@ -663,6 +824,43 @@ namespace BubbleShooter.Core
 
             // Ready for the next shot.
             SetState(GameState.Ready);
+        }
+
+        /// <summary>Score popups, "GREAT!" jaisa text aur camera ka halka jhatka.</summary>
+        private void PlayMatchFeedback(
+            int popped, int fallen, int matchPoints, int dropPoints,
+            Vector3 popCenter, Vector3 dropCenter, Color popColor)
+        {
+            if (!enableEffects)
+                return;
+
+            GameFX fx = GameFX.Instance;
+            if (fx == null)
+                return;
+
+            if (popped > 0 && matchPoints > 0)
+                fx.FloatingText(popCenter, "+" + matchPoints, Color.Lerp(popColor, Color.white, 0.35f), 1f);
+
+            if (fallen > 0 && dropPoints > 0)
+                fx.FloatingText(dropCenter + Vector3.up * 0.2f, "+" + dropPoints, new Color(1f, 0.92f, 0.35f), 1.2f, 1.1f);
+
+            int total = popped + fallen;
+            int combo = scoreManager != null ? scoreManager.ComboCount : 0;
+
+            if (total >= 6)
+                fx.Shake(Mathf.Clamp(0.03f + total * 0.006f, 0.04f, 0.16f), 0.3f);
+
+            if (gameplayUI == null)
+                return;
+
+            if (total >= 14)
+                gameplayUI.ShowPraise("INCREDIBLE!", new Color(1f, 0.45f, 0.9f));
+            else if (total >= 9)
+                gameplayUI.ShowPraise("AMAZING!", new Color(0.4f, 0.95f, 1f));
+            else if (total >= 6)
+                gameplayUI.ShowPraise("GREAT!", new Color(0.5f, 1f, 0.45f));
+            else if (combo >= 3)
+                gameplayUI.ShowPraise("COMBO x" + combo + "!", new Color(1f, 0.85f, 0.3f));
         }
 
         private int GetMaxMisses()
@@ -738,6 +936,7 @@ namespace BubbleShooter.Core
 
             ShowCPAd();
 
+            stateBeforePause = currentState;
             SetState(GameState.Paused);
 
             if (gameplayUI != null)
@@ -751,12 +950,21 @@ namespace BubbleShooter.Core
 
         public void ResumeGame()
         {
+            if (currentState != GameState.Paused)
+                return;
+
             Time.timeScale = 1f;
 
             if (gameplayUI != null)
                 gameplayUI.ShowPausePanel(false);
 
-            SetState(GameState.Ready);
+            // Udti bubble / processing ke dauran pause hua tha to wahi state wapas,
+            // warna coroutine ke khatam hone se pehle doosra shot chal jata tha.
+            GameState restore = stateBeforePause;
+            if (restore == GameState.Aiming || restore == GameState.Paused)
+                restore = GameState.Ready;
+
+            SetState(restore);
         }
 
         public void RetryLevel()
@@ -773,7 +981,8 @@ namespace BubbleShooter.Core
 
             Time.timeScale = 1f;
 
-            SceneManager.LoadScene("MainMenu");
+            SetState(GameState.Loading);
+            SceneFader.LoadScene("MainMenu");
         }
 
         public void NextLevel()

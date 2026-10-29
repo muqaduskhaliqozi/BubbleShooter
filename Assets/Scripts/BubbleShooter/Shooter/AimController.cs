@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using UnityEngine;
 using BubbleShooter.Core;
 using BubbleShooter.Grid;
+using BubbleShooter.Bubble;
+using BubbleShooter.FX;
 
 namespace BubbleShooter.Shooter
 {
@@ -76,6 +78,15 @@ namespace BubbleShooter.Shooter
 
         private Transform landingMarker;
 
+        // Runtime visuals (jab Inspector mein dotPrefab / ghostBubble na diye hon)
+        private Transform runtimeDotTemplate;
+        private bool usingRuntimeDots;
+        private SpriteRenderer runtimeGhostRing;
+        private bool boundsSet;
+        private bool pointerBlocked;
+        private Color baseAimColor = Color.white;
+        private float marchOffset;
+
         public Vector2 CurrentAimDirection => currentAimDirection;
         public bool IsAiming => isAiming;
 
@@ -86,14 +97,17 @@ namespace BubbleShooter.Shooter
 
         public event Action<Vector2> OnAimReleased;
 
+        // IMPORTANT: SetBounds() wali hadein wahi hain jo asli projectile use karti hai.
+        // Pehle preview grid.LeftWallX par takrata tha magar bubble aadha diameter aage ja kar,
+        // is liye dikhaya gaya raasta aur asli raasta alag hote the.
         private float LeftX =>
-            grid != null ? grid.LeftWallX : leftWallX;
+            boundsSet ? leftWallX : (grid != null ? grid.LeftWallX : leftWallX);
 
         private float RightX =>
-            grid != null ? grid.RightWallX : rightWallX;
+            boundsSet ? rightWallX : (grid != null ? grid.RightWallX : rightWallX);
 
         private float CeilingY =>
-            grid != null ? grid.CeilingY : topCeilingY;
+            boundsSet ? topCeilingY : (grid != null ? grid.CeilingY : topCeilingY);
 
         private void Awake()
         {
@@ -107,7 +121,46 @@ namespace BubbleShooter.Shooter
                 grid = FindObjectOfType<BubbleGrid>();
 
             SetupLineRenderer();
+            SetupRuntimeVisuals();
             HideAimLine();
+        }
+
+        /// <summary>
+        /// dotPrefab / ghostBubble khali hon to code se bana lo: chamakte gol nuqte
+        /// aur landing jagah par shaffaf "ghost" bubble.
+        /// </summary>
+        private void SetupRuntimeVisuals()
+        {
+            if (dotPrefab == null)
+            {
+                GameObject t = new GameObject("AimDotTemplate");
+                t.transform.SetParent(transform, false);
+                SpriteRenderer sr = t.AddComponent<SpriteRenderer>();
+                sr.sprite = FxSprites.Circle;
+                t.SetActive(false);
+                runtimeDotTemplate = t.transform;
+                dotPrefab = runtimeDotTemplate;
+                usingRuntimeDots = true;
+                showLandingMarker = false;   // ghost bubble kaafi hai
+                useDottedPreview = true;
+            }
+
+            if (ghostBubble == null)
+            {
+                GameObject g = new GameObject("AimGhostBubble");
+                g.transform.SetParent(transform, false);
+                ghostBubble = g.AddComponent<SpriteRenderer>();
+                ghostBubble.sprite = BubbleSpriteFactory.GetBaseSprite();
+                ghostBubble.sortingOrder = sortingOrder - 1;
+                ghostBubble.enabled = false;
+
+                GameObject r = new GameObject("GhostRing");
+                r.transform.SetParent(g.transform, false);
+                runtimeGhostRing = r.AddComponent<SpriteRenderer>();
+                runtimeGhostRing.sprite = FxSprites.Ring;
+                runtimeGhostRing.sortingOrder = sortingOrder;
+                runtimeGhostRing.enabled = false;
+            }
         }
 
         private void SetupLineRenderer()
@@ -159,6 +212,9 @@ namespace BubbleShooter.Shooter
 
         public void SetAimColor(Color color)
         {
+            baseAimColor = color;
+            // nuqte thore roshan taake gehre background par saaf dikhein
+            color = Color.Lerp(color, Color.white, 0.25f);
             startColor = color;
             endColor = color;
             dotColor = color;
@@ -179,6 +235,7 @@ namespace BubbleShooter.Shooter
             leftWallX = leftX;
             rightWallX = rightX;
             topCeilingY = ceilingY;
+            boundsSet = true;
         }
 
         public void ProcessAimInput(
@@ -224,6 +281,24 @@ namespace BubbleShooter.Shooter
 
                 if (Input.GetMouseButtonUp(0))
                     released = true;
+            }
+
+            // Pause / doosre UI button par tap se shot na chale
+            if (hasInput && !isAiming && !pointerBlocked)
+            {
+                Vector2 screenPos = Input.touchCount > 0
+                    ? Input.GetTouch(0).position
+                    : (Vector2)Input.mousePosition;
+
+                if (UIBuild.IsOverInteractableUI(screenPos))
+                    pointerBlocked = true;
+            }
+
+            if (pointerBlocked)
+            {
+                if (released || (!hasInput && Input.touchCount == 0 && !Input.GetMouseButton(0)))
+                    pointerBlocked = false;
+                return;
             }
 
             if (hasInput)
@@ -283,8 +358,9 @@ namespace BubbleShooter.Shooter
             float diameter =
                 grid != null ? grid.BubbleDiameter : 0.8f;
 
-            float hitRadius = diameter * 0.85f;
-            float step = diameter * 0.2f;
+            // Projectile jaisa hi hit distance (0.92) taake preview aur asli shot ek hon
+            float hitRadius = diameter * 0.92f;
+            float step = diameter * 0.1f;
 
             if (step < 0.01f ||
                 float.IsNaN(direction.x) ||
@@ -308,6 +384,8 @@ namespace BubbleShooter.Shooter
             float travelled = 0f;
             int bounces = 0;
             bool ended = false;
+            bool endedOnCeiling = false;
+            BubbleController hitTarget = null;
 
             int safetyCounter = 0;
             const int maxIterations = 2000;
@@ -344,14 +422,16 @@ namespace BubbleShooter.Shooter
                 // Stop at ceiling or an existing bubble
                 bool hitCeiling = pos.y >= ceiling;
 
-                bool hitBubble =
-                    grid != null &&
-                    grid.FindHitBubble(pos, hitRadius) != null;
+                BubbleController hb = (!hitCeiling && grid != null)
+                    ? grid.FindHitBubble(pos, hitRadius)
+                    : null;
 
-                if (hitCeiling || hitBubble)
+                if (hitCeiling || hb != null)
                 {
                     trajectoryPoints.Add(pos);
                     ended = true;
+                    endedOnCeiling = hitCeiling;
+                    hitTarget = hb;
                     break;
                 }
             }
@@ -384,7 +464,7 @@ namespace BubbleShooter.Shooter
                 HideDottedPreview();
 
             UpdateLandingMarker(pos);
-            UpdateGhost(pos);
+            UpdateGhost(pos, ended, endedOnCeiling, hitTarget);
         }
 
         private void UpdateDottedPreview()
@@ -396,11 +476,22 @@ namespace BubbleShooter.Shooter
                 return;
             }
 
-            float spacing = Mathf.Max(0.02f, dotSpacing);
+            float diameterForDots = grid != null ? grid.BubbleDiameter : 0.4f;
+            float spacing = Mathf.Max(0.02f, usingRuntimeDots ? diameterForDots * 0.55f : dotSpacing);
+            float baseDotSize = usingRuntimeDots ? diameterForDots * 0.26f : dotSize;
             int dotIndex = 0;
 
+            // Nuqte aage ki taraf "chalte" hue dikhte hain
+            marchOffset = Mathf.Repeat(marchOffset + Time.deltaTime * spacing * 2.2f, spacing);
+
+            float totalLength = 0f;
+            for (int i = 1; i < trajectoryPoints.Count; i++)
+                totalLength += Vector3.Distance(trajectoryPoints[i - 1], trajectoryPoints[i]);
+            totalLength = Mathf.Max(0.001f, totalLength);
+            float travelled = 0f;
+
             // Preserves dot spacing across bounce segments
-            float distanceUntilNextDot = spacing;
+            float distanceUntilNextDot = spacing - marchOffset + 0.001f;
 
             for (int i = 1;
                  i < trajectoryPoints.Count;
@@ -433,14 +524,21 @@ namespace BubbleShooter.Shooter
                     dot.position =
                         from + segmentDirection * distanceOnSegment;
 
-                    dot.localScale = Vector3.one * dotSize;
+                    float along = Mathf.Clamp01((travelled + distanceOnSegment) / totalLength);
+                    float taper = Mathf.Lerp(1f, 0.55f, along);
+
+                    // Shooter ke bilkul paas wale nuqte chhote (bubble ke andar na dikhein)
+                    float nearFade = Mathf.Clamp01((travelled + distanceOnSegment) / (spacing * 1.5f));
+                    dot.localScale = Vector3.one * (baseDotSize * taper * Mathf.Lerp(0.4f, 1f, nearFade));
 
                     SpriteRenderer sr =
                         dot.GetComponent<SpriteRenderer>();
 
                     if (sr != null)
                     {
-                        sr.color = dotColor;
+                        Color c = dotColor;
+                        c.a = dotColor.a * Mathf.Lerp(1f, 0.35f, along) * nearFade;
+                        sr.color = c;
                         sr.sortingOrder = sortingOrder + 1;
                     }
 
@@ -452,6 +550,8 @@ namespace BubbleShooter.Shooter
 
                 if (dotIndex >= maxDots)
                     break;
+
+                travelled += segmentLength;
 
                 distanceUntilNextDot -=
                     segmentLength - distanceOnSegment;
@@ -520,20 +620,46 @@ namespace BubbleShooter.Shooter
                 landingMarker.gameObject.SetActive(false);
         }
 
-        private void UpdateGhost(Vector3 endPos)
+        private void UpdateGhost(Vector3 endPos, bool ended, bool onCeiling, BubbleController hitTarget)
         {
             if (ghostBubble == null || grid == null)
                 return;
 
-            GridCoordinate coord =
-                grid.WorldToGridPosition(endPos);
-
-            coord = grid.FindNearestEmptyNeighbor(
-                coord, endPos);
-
-            if (!grid.IsEmpty(coord.Row, coord.Column))
+            if (!ended)
             {
-                ghostBubble.enabled = false;
+                HideGhost();
+                return;
+            }
+
+            // Wahi logic jo BubbleProjectile lagne par use karti hai
+            GridCoordinate coord;
+
+            if (onCeiling)
+            {
+                GridCoordinate raw = grid.WorldToGridPosition(endPos);
+                coord = new GridCoordinate(0, raw.Column);
+                if (!grid.IsEmpty(coord.Row, coord.Column))
+                    coord = grid.FindNearestEmptyNeighbor(coord, endPos);
+            }
+            else if (hitTarget != null && hitTarget.CanBeDestroyedByDirectHit)
+            {
+                coord = hitTarget.GridPosition;   // khuli rassi wali bubble ki jagah le leti hai
+            }
+            else if (hitTarget != null)
+            {
+                coord = grid.FindAttachCellForHit(hitTarget, endPos);
+            }
+            else
+            {
+                coord = grid.WorldToGridPosition(endPos);
+                coord = grid.FindNearestEmptyNeighbor(coord, endPos);
+            }
+
+            bool replaces = hitTarget != null && hitTarget.CanBeDestroyedByDirectHit && coord == hitTarget.GridPosition;
+
+            if (!grid.IsValidCoordinate(coord) || (!grid.IsEmpty(coord.Row, coord.Column) && !replaces))
+            {
+                HideGhost();
                 return;
             }
 
@@ -544,19 +670,37 @@ namespace BubbleShooter.Shooter
 
                 if (size > 0.0001f)
                 {
+                    float pulse = 1f + Mathf.Sin(Time.time * 7f) * 0.04f;
                     ghostBubble.transform.localScale =
                         Vector3.one *
-                        (grid.BubbleDiameter / size);
+                        (grid.BubbleDiameter / size) * pulse;
                 }
             }
 
             ghostBubble.transform.position =
                 grid.GridToWorldPosition(coord);
 
-            ghostBubble.color =
-                new Color(1f, 1f, 1f, 0.35f);
-
+            Color gc = baseAimColor;
+            gc.a = 0.38f + Mathf.Sin(Time.time * 7f) * 0.08f;
+            ghostBubble.color = gc;
             ghostBubble.enabled = true;
+
+            if (runtimeGhostRing != null)
+            {
+                Color rc = Color.Lerp(baseAimColor, Color.white, 0.6f);
+                rc.a = 0.85f;
+                runtimeGhostRing.color = rc;
+                runtimeGhostRing.enabled = true;
+            }
+        }
+
+        private void HideGhost()
+        {
+            if (ghostBubble != null)
+                ghostBubble.enabled = false;
+
+            if (runtimeGhostRing != null)
+                runtimeGhostRing.enabled = false;
         }
 
         private void HideDottedPreview()
@@ -575,9 +719,7 @@ namespace BubbleShooter.Shooter
 
             HideDottedPreview();
             HideLandingMarker();
-
-            if (ghostBubble != null)
-                ghostBubble.enabled = false;
+            HideGhost();
         }
 
         private void OnDestroy()

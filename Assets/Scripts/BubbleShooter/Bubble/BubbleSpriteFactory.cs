@@ -22,12 +22,16 @@ namespace BubbleShooter.Bubble
 
         private static Sprite BuildBase()
         {
+            // Grey-scale shading: color SpriteRenderer.color se multiply hota hai.
+            // Upgrade: gehri 3D shading, andar se roshni (subsurface), saaf gehra kinara.
             Texture2D tex = NewTexture();
             float c = (Size - 1) / 2f;
             float r = Size / 2f - 2f;
 
-            Vector3 light = new Vector3(-0.4f, 0.5f, 0.75f).normalized;
-            Vector3 bounce = new Vector3(0.3f, -0.7f, 0.5f).normalized;
+            Vector3 light = new Vector3(-0.45f, 0.55f, 0.7f).normalized;
+            Vector3 bounce = new Vector3(0.35f, -0.75f, 0.45f).normalized;
+
+            Color[] px = new Color[Size * Size];
 
             for (int y = 0; y < Size; y++)
             {
@@ -39,7 +43,7 @@ namespace BubbleShooter.Bubble
 
                     if (d > 1.02f)
                     {
-                        tex.SetPixel(x, y, Color.clear);
+                        px[y * Size + x] = Color.clear;
                         continue;
                     }
 
@@ -47,20 +51,30 @@ namespace BubbleShooter.Bubble
                     Vector3 n = new Vector3(nx, ny, nz);
 
                     float diffuse = Mathf.Clamp01(Vector3.Dot(n, light));
-                    float shade = 0.45f + diffuse * 0.55f;
+                    float shade = 0.5f + diffuse * 0.5f;
 
-                    float b = Mathf.Pow(Mathf.Clamp01(Vector3.Dot(n, bounce)), 3f) * 0.2f;
-                    shade += b;
+                    // neeche se aane wali halki roshni (bounce)
+                    shade += Mathf.Pow(Mathf.Clamp01(Vector3.Dot(n, bounce)), 3f) * 0.22f;
+
+                    // andar ki chamak (bubble ke beech thori roshni, glassy)
+                    float inner = Mathf.Clamp01(1f - Mathf.Sqrt((nx + 0.1f) * (nx + 0.1f) + (ny + 0.15f) * (ny + 0.15f)) / 0.75f);
+                    shade += inner * inner * 0.12f;
 
                     // kinare gehre
-                    shade *= Mathf.Lerp(1f, 0.6f, Mathf.Pow(d, 3f));
+                    shade *= Mathf.Lerp(1f, 0.55f, Mathf.Pow(d, 3.2f));
+
+                    // saaf patli outline (rang ka gehra roop)
+                    float rim = Mathf.Clamp01((d - 0.9f) / 0.08f);
+                    shade = Mathf.Lerp(shade, shade * 0.62f, rim);
+
                     shade = Mathf.Clamp01(shade);
 
                     float alpha = Mathf.Clamp01((1f - d) * r / 1.5f);
-                    tex.SetPixel(x, y, new Color(shade, shade, shade, alpha));
+                    px[y * Size + x] = new Color(shade, shade, shade, alpha);
                 }
             }
 
+            tex.SetPixels(px);
             tex.Apply();
             return Sprite.Create(tex, new Rect(0, 0, Size, Size), new Vector2(0.5f, 0.5f), 256f);
         }
@@ -95,12 +109,21 @@ namespace BubbleShooter.Bubble
                         float h = Mathf.Sqrt(hx * hx + hy * hy) / 0.09f;
                         if (h < 1f) a += (1f - h) * 0.9f;
 
+                        // 2b) neeche wala patla chaand (crescent) reflection
+                        float cx = nx - 0.05f;
+                        float cy = ny + 0.62f;
+                        float cres = Mathf.Sqrt(cx * cx / 0.42f + cy * cy / 0.06f);
+                        if (cres < 1f && ny < -0.35f) a += (1f - cres) * 0.35f;
+
                         // 3) neeche-right ki rim reflection
-                        if (nx > -0.1f && ny < 0.1f && d > 0.72f)
+                        // (naram kinaron ke saath, pehle yahan saaf chaukor kona dikhta tha)
+                        if (d > 0.72f)
                         {
+                            float side = Mathf.Clamp01((nx + 0.25f) / 0.45f) *
+                                         Mathf.Clamp01((0.25f - ny) / 0.45f);
                             float rim = Mathf.Clamp01((d - 0.72f) / 0.2f) *
                                         Mathf.Clamp01((0.98f - d) / 0.06f);
-                            a += rim * 0.28f;
+                            a += rim * side * 0.3f;
                         }
                     }
 

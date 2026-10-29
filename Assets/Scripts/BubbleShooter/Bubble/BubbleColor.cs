@@ -25,24 +25,24 @@ namespace BubbleShooter.Bubble
             switch (bubbleColor)
             {
                 case BubbleColor.Red:
-                    return new Color(1f, 0.08f, 0.1f, 1f);
+                    return new Color(1f, 0.16f, 0.2f, 1f);
 
                 case BubbleColor.Blue:
-                    return new Color(0.1f, 0.2f, 1f, 1f);
+                    return new Color(0.2f, 0.45f, 1f, 1f);
 
                 // Purane levels ka existing color preserve kiya hai (ye asal mein cyan hai).
                 case BubbleColor.Green:
-                    return new Color(0.1f, 0.85f, 0.9f, 1f);
+                    return new Color(0.15f, 0.9f, 0.95f, 1f);
 
                 case BubbleColor.Yellow:
-                    return new Color(1f, 0.92f, 0.05f, 1f);
+                    return new Color(1f, 0.88f, 0.12f, 1f);
 
                 case BubbleColor.Purple:
-                    return new Color(0.9f, 0.1f, 0.9f, 1f);
+                    return new Color(0.75f, 0.3f, 1f, 1f);
 
                 // Level 7 ke liye alag bright green.
                 case BubbleColor.BrightGreen:
-                    return new Color(0.1f, 0.9f, 0.15f, 1f);
+                    return new Color(0.25f, 0.92f, 0.25f, 1f);
 
                 // Level 9: orange (yellow se alag, zyada gehra)
                 case BubbleColor.Orange:
